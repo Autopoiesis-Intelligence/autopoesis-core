@@ -10,6 +10,11 @@
       "id": "CORE-002",
       "type": "proposal",
       "description": "Specify the smallest replaceable interface for a future code-writing agent. Do not implement network access or credentials."
+    },
+    {
+      "id": "CORE-003",
+      "type": "discover_tasks",
+      "description": "Inspect repository Python sources for TODO/FIXME/HACK markers and source modules lacking conventional tests; report evidence-backed candidates without modifying files."
     }
   ]
 }
