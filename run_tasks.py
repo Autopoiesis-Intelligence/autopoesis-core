@@ -296,6 +296,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         result = verify_decision_journal()
     elif task_type == "verify_evaluation_receipt_persistence":
         result = verify_evaluation_receipt_persistence()
+    elif task_type == "verify_candidate_execution_boundary":
+        result = verify_candidate_execution_boundary()
     elif task_type == "proposal":
         description = task.get("description", "")
         if not isinstance(description, str):
