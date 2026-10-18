@@ -469,6 +469,40 @@ class EvolutionCoreTests(unittest.TestCase):
                 execute_selected_task({"type": "execute_selected_task"}, path)
 
 
+    def test_queue_select_execute_sandbox_and_reload_preserves_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{
+                "id": "CORE-SEQ-M2-ROUNDTRIP",
+                "type": "verify_test_patch_sandbox",
+                "source": "autopoesis/task_queue.py",
+                "evidence": "round-trip integration test",
+                "description": "Verify generated import test in disposable package copy.",
+                "priority": 7,
+            }])
+
+            selected = select_next_task_file(path)
+            self.assertEqual(selected["task_id"], "CORE-SEQ-M2-ROUNDTRIP")
+            self.assertFalse(selected["execution_started"])
+
+            result = execute_selected_task(
+                {"type": "execute_selected_task", "task_id": "CORE-SEQ-M2-ROUNDTRIP"},
+                path,
+            )
+            self.assertEqual(result["status"], "PASS", result.get("result"))
+            self.assertTrue(result["execution_started"])
+            self.assertFalse(result["automatic_completion"])
+
+            # Re-read from disk to exercise persistence, not just in-memory state.
+            restored = load_queue(path)
+            item = next(item for item in restored["items"] if item["id"] == "CORE-SEQ-M2-ROUNDTRIP")
+            self.assertEqual(item["status"], "IN_PROGRESS")
+            event = restored["history"][-1]
+            self.assertEqual(event["event"], "TASK_RESULT_RECORDED")
+            self.assertEqual(event["result_status"], "PASS")
+            self.assertEqual(len(event["evidence_sha256"]), 64)
+            self.assertEqual(event["task_id"], "CORE-SEQ-M2-ROUNDTRIP")
+
     def test_selected_executor_prepares_real_patch_artifact_without_applying_it(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "TASK_QUEUE.json"
