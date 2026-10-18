@@ -565,3 +565,17 @@ if __name__ == "__main__":
             self.assertEqual(queue_path.read_bytes(), before)
             self.assertEqual(load_queue(queue_path)["items"][0]["status"], "OPEN")
             self.assertEqual(list(queue_path.parent.glob(".TASK_QUEUE.json.*.tmp")), [])
+
+
+    def test_core_014_queue_loader_rejects_malformed_version_and_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            for malformed in (
+                {"version": True, "items": [], "history": []},
+                {"version": 1, "items": [], "history": [None]},
+                {"version": 1, "items": [], "history": [{"event": ""}]},
+            ):
+                path.write_text(json.dumps(malformed), encoding="utf-8")
+                with self.subTest(malformed=malformed):
+                    with self.assertRaises(EvolutionError):
+                        load_queue(path)
