@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from autopoesis.core import EvolutionError, digest_state, evolve
+from run_tasks import discover_tasks
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +53,28 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             result = json.loads(result_file.read_text(encoding="utf-8"))
             self.assertEqual(result["tasks"][0]["status"], "PASS")
+
+
+    def test_discovery_finds_actionable_source_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "autopoesis" / "example.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("# TODO: replace placeholder\\n", encoding="utf-8")
+            result = discover_tasks(root)
+            self.assertEqual(result["status"], "CANDIDATES_FOUND")
+            self.assertGreaterEqual(result["candidate_count"], 2)
+            self.assertTrue(any("TODO marker" in item["evidence"] for item in result["candidates"]))
+            self.assertTrue(any("test_example.py" in item["evidence"] for item in result["candidates"]))
+
+    def test_discovery_reports_empty_scan_without_mutating_repository(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "autopoesis").mkdir()
+            (root / "tests").mkdir()
+            result = discover_tasks(root)
+            self.assertEqual(result["status"], "NO_CANDIDATES")
+            self.assertEqual(result["candidate_count"], 0)
 
 
 if __name__ == "__main__":
