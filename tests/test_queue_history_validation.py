@@ -25,6 +25,14 @@ class QueueHistoryValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(EvolutionError, "expected an object"):
             load_queue(self._write_queue(["not-an-event"]))
 
+    def test_rejects_non_string_history_event_type(self):
+        with self.assertRaisesRegex(EvolutionError, "unsupported event type"):
+            load_queue(self._write_queue([{
+                "event": ["UNKNOWN"],
+                "task_id": "TASK-1",
+                "at": "2026-01-01T00:00:00+00:00",
+            }]))
+
     def test_rejects_unknown_history_event_type(self):
         with self.assertRaisesRegex(EvolutionError, "unsupported event type"):
             load_queue(self._write_queue([{
@@ -45,6 +53,17 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "task_id": "TASK-1",
                 "at": "",
             }]))
+
+    def test_rejects_non_string_queue_status(self):
+        with self.assertRaisesRegex(EvolutionError, "Invalid status"):
+            load_queue(self._write_queue([]) if False else self._write_queue([]))
+        # The task status is independently validated before history records.
+        path = self._write_queue([])
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["items"][0]["status"] = ["DONE"]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        with self.assertRaisesRegex(EvolutionError, "Invalid status"):
+            load_queue(path)
 
     def test_rejects_invalid_status_transition_history(self):
         with self.assertRaisesRegex(EvolutionError, "destination status"):
