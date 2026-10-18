@@ -197,3 +197,12 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - Added a fixed `docker image inspect python:3.12-slim` probe to determine whether the expected Python image is already present locally. The probe does not pull an image and does not run candidate code.
 - This separates three facts that must not be conflated: Docker CLI present, Docker daemon reachable, and a specific reviewed execution image available.
 - CI must report the exact-head result before selecting the execution image. If the image is absent, do not silently pull during a task run; decide explicitly how image provenance and availability are managed.
+
+
+### SEQ J: observed exact-head runtime results
+
+- CI run #134, ID `39129958896`, completed SUCCESS on exact HEAD `25d09f733b2a1b3e77d4091e41b8e005d5e171f5`. Unit tests, file-based tasks, and artifact upload succeeded.
+- Downloaded artifact `autopoesis-core-results`, ID `12137139591`, and inspected `RESULTS.json` for CORE-012.
+- Observed on the GitHub Actions runner: Docker daemon reachable (version `28.0.4`); `python:3.12-slim` image not cached; Podman probe timed out; user-namespace probe failed with `Operation not permitted`.
+- These results narrow the likely adapter to Docker, but do not yet establish candidate isolation. No image was pulled and no candidate code was executed.
+- Next gate: select and pin an approved image by immutable digest, then implement a Docker adapter that fails closed when the image or required flags are unavailable. Test resource limits, read-only workspace, network denial, credential exclusion, bounded output, timeout/cleanup, and exit evidence before enabling it for generated candidates.
