@@ -8,7 +8,7 @@ from pathlib import Path
 from autopoesis.core import EvolutionError, digest_state, evolve
 from run_tasks import discover_tasks
 from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, update_queue_file
-from autopoesis.executor import prepare_patch_artifact, validate_patch_artifact
+from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -204,6 +204,45 @@ class EvolutionCoreTests(unittest.TestCase):
         ).hexdigest()
         with self.assertRaises(ValueError):
             validate_patch_artifact(artifact)
+
+    def test_patch_is_applied_only_to_explicit_sandbox(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            source = repository / "autopoesis" / "example.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("VALUE = 1\\n", encoding="utf-8")
+            artifact = prepare_patch_artifact(
+                {"id": "DISC-SANDBOX", "source": "autopoesis/example.py"},
+                repository,
+            )
+            sandbox = root / "sandbox"
+            result = apply_patch_to_sandbox(artifact, sandbox)
+            generated = sandbox / "tests" / "test_example.py"
+            self.assertEqual(result["status"], "APPLIED_TO_SANDBOX")
+            self.assertTrue(generated.is_file())
+            self.assertFalse((repository / "tests" / "test_example.py").exists())
+            self.assertFalse(result["repository_modified"])
+            self.assertFalse(result["generated_code_executed"])
+
+    def test_patch_application_refuses_to_overwrite_sandbox_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            source = repository / "autopoesis" / "example.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("VALUE = 1\\n", encoding="utf-8")
+            artifact = prepare_patch_artifact(
+                {"id": "DISC-NO-OVERWRITE", "source": "autopoesis/example.py"},
+                repository,
+            )
+            sandbox = root / "sandbox"
+            target = sandbox / "tests" / "test_example.py"
+            target.parent.mkdir(parents=True)
+            target.write_text("KEEP = True\\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                apply_patch_to_sandbox(artifact, sandbox)
+            self.assertEqual(target.read_text(encoding="utf-8"), "KEEP = True\\n")
 
     def test_bounded_writer_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as directory:
