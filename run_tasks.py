@@ -30,7 +30,7 @@ def verify_evolution_cycle() -> dict[str, Any]:
         raise AssertionError("No-op transition was not rejected")
 
     return {
-        "deterministic_digest": digest_state(candidate) == digest_state(candidate),
+        "deterministic_digest": digest_state(candidate) == digest_state({"label": "next", "counter": 2}),
         "meaningful_transition_accepted": transition["accepted"],
         "noop_rejected": noop_rejected,
         "state_digest": transition["state_digest"],
