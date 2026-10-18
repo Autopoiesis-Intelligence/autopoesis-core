@@ -8,7 +8,7 @@ from pathlib import Path
 from autopoesis.core import EvolutionError, digest_state, evolve
 from run_tasks import discover_tasks
 from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, update_queue_file
-from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact
+from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact, verify_test_patch_in_sandbox
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -254,6 +254,38 @@ class EvolutionCoreTests(unittest.TestCase):
                 prepare_patch_artifact(
                     {"id": "DISC-EXAMPLE", "source": "../outside.py"},
                     root,
+                )
+
+
+    def test_generated_import_test_executes_in_disposable_package_copy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "autopoesis"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "example.py").write_text("VALUE = 42\\n", encoding="utf-8")
+            result = verify_test_patch_in_sandbox(
+                {"id": "DISC-VERIFY", "source": "autopoesis/example.py"},
+                root,
+            )
+            self.assertEqual(result["verification_status"], "PASS", result["stdout"] + result["stderr"])
+            self.assertEqual(result["return_code"], 0)
+            self.assertTrue(result["generated_code_executed"])
+            self.assertFalse(result["repository_modified"])
+            self.assertIn("Ran 1 test", result["stderr"])
+            self.assertFalse((root / "tests" / "test_example.py").exists())
+
+    def test_sandbox_verification_rejects_unbounded_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "autopoesis"
+            package.mkdir()
+            (package / "example.py").write_text("VALUE = 1\\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                verify_test_patch_in_sandbox(
+                    {"id": "DISC-TIMEOUT", "source": "autopoesis/example.py"},
+                    root,
+                    timeout_seconds=999,
                 )
 
 
