@@ -66,7 +66,7 @@ jobs:
               "source_conclusion": run.get("conclusion"),
           }
           Path("QUEUE_RESTORE_PROVENANCE.json").write_text(
-              json.dumps(provenance, indent=2, sort_keys=True) + "\\n",
+              json.dumps(provenance, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
           print(
