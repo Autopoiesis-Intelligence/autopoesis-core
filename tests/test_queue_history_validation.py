@@ -74,6 +74,17 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "at": "2026-01-01T00:00:00+00:00",
             }]))
 
+    def test_rejects_non_string_transition_note(self):
+        with self.assertRaisesRegex(EvolutionError, "note must be a string"):
+            load_queue(self._write_queue([{
+                "event": "STATUS_CHANGED",
+                "task_id": "TASK-1",
+                "from": "OPEN",
+                "to": "DONE",
+                "note": ["not-a-string"],
+                "at": "2026-01-01T00:00:00+00:00",
+            }]))
+
     def test_accepts_history_written_by_queue_helpers(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "TASK_QUEUE.json"
