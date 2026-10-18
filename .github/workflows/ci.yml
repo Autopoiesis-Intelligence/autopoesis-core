@@ -47,9 +47,16 @@ jobs:
           from pathlib import Path
 
           run = json.loads(Path(".restore-run.json").read_text(encoding="utf-8"))
+          requested_run_id = os.environ["RESTORE_RUN_ID"]
+          if str(run.get("id", "")) != requested_run_id:
+              raise SystemExit("Source run ID does not match restore_run_id")
           if run.get("conclusion") != "success":
               raise SystemExit(
                   f"Source run must have conclusion=success; got {run.get('conclusion')!r}"
+              )
+          if run.get("event") != "workflow_dispatch":
+              raise SystemExit(
+                  f"Source run must be an explicit workflow_dispatch seed run; got {run.get('event')!r}"
               )
           workflow_path = str(run.get("path", "")).split("@", 1)[0]
           if workflow_path != ".github/workflows/ci.yml":
@@ -60,8 +67,12 @@ jobs:
           if repository != os.environ["GITHUB_REPOSITORY"]:
               raise SystemExit("Source run belongs to a different repository")
           source_sha = run.get("head_sha")
-          if not isinstance(source_sha, str) or len(source_sha) != 40:
-              raise SystemExit("Source run does not expose a valid 40-character head SHA")
+          if (
+              not isinstance(source_sha, str)
+              or len(source_sha) != 40
+              or any(char not in "0123456789abcdefABCDEF" for char in source_sha)
+          ):
+              raise SystemExit("Source run does not expose a valid 40-character hexadecimal head SHA")
           provenance = {
               "source_run_id": run.get("id"),
               "source_run_url": run.get("html_url"),
