@@ -503,5 +503,65 @@ class EvolutionCoreTests(unittest.TestCase):
         self.assertFalse(result["result"]["sandbox_verified"])
 
 
+    def test_docker_command_builder_is_inert_and_digest_pinned(self):
+        from autopoesis.execution_policy import CandidateExecutionPolicy, build_docker_test_command
+
+        policy = CandidateExecutionPolicy(
+            command_profile="python-unittest-v1",
+            timeout_seconds=30,
+            max_output_bytes=100_000,
+            network_disabled=True,
+            secrets_excluded=True,
+            filesystem_isolated=True,
+            os_sandbox_enforced=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = build_docker_test_command(
+                image_digest="sha256:" + "a" * 64,
+                workspace=directory,
+                policy=policy,
+            )
+        argv = result["argv"]
+        for flag in ("--network=none", "--read-only", "--cap-drop=ALL",
+                     "--security-opt=no-new-privileges:true", "--pids-limit=64",
+                     "--memory=256m", "--cpus=1"):
+            self.assertIn(flag, argv)
+        self.assertEqual(result["status"], "COMMAND_PREPARED_NOT_EXECUTED")
+        self.assertFalse(result["shell"])
+        self.assertFalse(result["candidate_code_executed"])
+        self.assertFalse(result["execution_authorized"])
+        self.assertFalse(result["sandbox_verified"])
+        self.assertIn("python@sha256:" + "a" * 64, argv)
+
+    def test_docker_command_builder_rejects_tags_and_bad_workspace(self):
+        from autopoesis.execution_policy import CandidateExecutionPolicy, build_docker_test_command
+
+        policy = CandidateExecutionPolicy(
+            command_profile="python-unittest-v1",
+            timeout_seconds=30,
+            max_output_bytes=100_000,
+            network_disabled=True,
+            secrets_excluded=True,
+            filesystem_isolated=True,
+            os_sandbox_enforced=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError):
+                build_docker_test_command(image_digest="python:3.12-slim", workspace=directory, policy=policy)
+        with self.assertRaises(ValueError):
+            build_docker_test_command(image_digest="sha256:" + "a" * 64, workspace="relative/path", policy=policy)
+
+    def test_docker_command_builder_task_is_reachable_and_inert(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = execute_task(
+                {"id": "test-docker-command-builder", "type": "verify_docker_command_builder"},
+                Path(directory) / "TASK_QUEUE.json",
+            )
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["result"]["status"], "COMMAND_PREPARED_NOT_EXECUTED")
+        self.assertFalse(result["result"]["candidate_code_executed"])
+        self.assertFalse(result["result"]["execution_authorized"])
+
+
 if __name__ == "__main__":
     unittest.main()
