@@ -160,6 +160,51 @@ def validate_patch_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "execution_performed": False,
     }
 
+
+def apply_patch_to_sandbox(artifact: dict[str, Any], sandbox_root: Path) -> dict[str, Any]:
+    """Apply a validated patch only inside an explicit disposable workspace; never overwrite."""
+    validation = validate_patch_artifact(artifact)
+    root = sandbox_root.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    if not root.is_dir():
+        raise ValueError("Sandbox root must be a directory")
+
+    targets: list[tuple[Path, str, str]] = []
+    for item in artifact["files"]:
+        relative = Path(item["path"])
+        target = root / relative
+        if relative.parts[0] != "tests" or target.parent.is_symlink():
+            raise ValueError("Sandbox target directory must not be a symlink")
+        resolved_target = target.resolve()
+        if root not in resolved_target.parents:
+            raise ValueError("Patch target escapes sandbox root")
+        if target.exists():
+            raise ValueError(f"Refusing to overwrite sandbox file: {relative.as_posix()}")
+        targets.append((target, item["content"], relative.as_posix()))
+
+    created: list[Path] = []
+    try:
+        for target, content, _relative in targets:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("x", encoding="utf-8", newline="") as stream:
+                stream.write(content)
+            created.append(target)
+    except Exception:
+        for path in reversed(created):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        raise
+
+    return {
+        "status": "APPLIED_TO_SANDBOX",
+        "files_written": [relative for _target, _content, relative in targets],
+        "artifact_sha256": validation["artifact_sha256"],
+        "repository_modified": False,
+        "generated_code_executed": False,
+    }
+
 def prepare_patch_artifact(
     task: dict[str, Any],
     repository_root: Path,
