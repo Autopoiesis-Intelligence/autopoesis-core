@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -204,6 +207,68 @@ def apply_patch_to_sandbox(artifact: dict[str, Any], sandbox_root: Path) -> dict
         "repository_modified": False,
         "generated_code_executed": False,
     }
+
+
+def verify_test_patch_in_sandbox(
+    task: dict[str, Any],
+    repository_root: Path,
+    timeout_seconds: int = 10,
+) -> dict[str, Any]:
+    """Generate one bounded test, then execute it in a disposable copied package."""
+    if not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 30:
+        raise ValueError("Sandbox test timeout must be between 1 and 30 seconds")
+
+    root = repository_root.resolve()
+    artifact = prepare_patch_artifact(task, root)
+    source_package = root / "autopoesis"
+    if not source_package.is_dir():
+        raise ValueError("Required autopoesis package is missing")
+    for path in source_package.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Refusing to copy a source package containing symlinks")
+
+    with __import__("tempfile").TemporaryDirectory(prefix="autopoesis-verify-") as directory:
+        workspace = Path(directory)
+        shutil.copytree(source_package, workspace / "autopoesis", symlinks=True)
+        (workspace / "tests").mkdir()
+        application = apply_patch_to_sandbox(artifact, workspace)
+        generated_path = artifact["files"][0]["path"]
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "tests",
+                "-p",
+                Path(generated_path).name,
+                "-v",
+            ],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+            env={**__import__("os").environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        passed = completed.returncode == 0
+        return {
+            "verification_status": "PASS" if passed else "FAIL",
+            "generated_test": generated_path,
+            "return_code": completed.returncode,
+            "stdout": completed.stdout[-4000:],
+            "stderr": completed.stderr[-4000:],
+            "timeout_seconds": timeout_seconds,
+            "artifact_sha256": artifact["artifact_sha256"],
+            "sandbox_application": application,
+            "source_package_copied": True,
+            "repository_modified": False,
+            "generated_code_executed": True,
+            "execution_boundary": "only the bounded generated import test in a temporary copied package",
+            "sandbox_lifetime": "temporary; removed after the task",
+        }
+
 
 def prepare_patch_artifact(
     task: dict[str, Any],
