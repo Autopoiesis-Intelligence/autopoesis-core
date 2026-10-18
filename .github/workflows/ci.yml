@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       restore_run_id:
-        description: "Optional prior successful CI run ID whose autopoesis-core-results artifact contains TASK_QUEUE.json"
+        description: "Digits only: run ID of a prior successful workflow run that contains the seeded DONE and verification probes. Leave blank for the seed run."
         required: false
         type: string
         default: ""
@@ -42,7 +42,7 @@ jobs:
           RESTORE_RUN_ID: ${{ inputs.restore_run_id }}
         run: |
           if [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
-            echo "restore_run_id must be a numeric GitHub Actions run ID" >&2
+            echo "Invalid restore_run_id: enter only the numeric ID of a prior successful seed run (digits only), not the field name or a URL. Leave blank when creating the seed run." >&2
             exit 1
           fi
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESTORE_RUN_ID}" > .restore-run.json
