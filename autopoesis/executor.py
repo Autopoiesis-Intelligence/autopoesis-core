@@ -220,7 +220,6 @@ def verify_test_patch_in_sandbox(
         raise ValueError("Sandbox test timeout must be between 1 and 30 seconds")
 
     root = repository_root.resolve()
-    artifact = prepare_patch_artifact(task, root)
     source_package = root / "autopoesis"
     if source_package.is_symlink():
         raise ValueError("Refusing to copy a symlinked source package")
@@ -233,6 +232,7 @@ def verify_test_patch_in_sandbox(
         if path.is_symlink():
             raise ValueError("Refusing to copy a source package containing symlinks")
 
+    artifact = prepare_patch_artifact(task, root)
     with tempfile.TemporaryDirectory(prefix="autopoesis-verify-") as directory:
         workspace = Path(directory)
         shutil.copytree(source_package, workspace / "autopoesis", symlinks=True)
