@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from run_tasks import discover_tasks, execute_selected_task
+from run_tasks import discover_tasks, execute_selected_task, execute_task
 from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, record_task_result_file, select_next_task_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact, verify_test_patch_in_sandbox
 
@@ -382,6 +382,22 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertEqual(item["status"], "IN_PROGRESS")
             self.assertEqual(queue["history"][-1]["event"], "TASK_RESULT_RECORDED")
             self.assertEqual(queue["history"][-1]["result_status"], "PASS")
+
+    def test_runner_reports_blocked_selected_task_as_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{
+                "id": "DISC-BLOCKED-RUNNER",
+                "type": "arbitrary_shell",
+                "source": "ignored",
+                "evidence": "untrusted task type",
+                "description": "Must not execute.",
+            }])
+            record_outcome_file(path, "DISC-BLOCKED-RUNNER", "SELECTED", "test runner status propagation")
+            result = execute_task({"id": "CORE-010", "type": "execute_selected_task"}, path)
+            self.assertEqual(result["status"], "FAIL")
+            self.assertEqual(result["result"]["status"], "BLOCKED")
+            self.assertFalse(result["result"]["execution_started"])
 
     def test_selected_executor_blocks_unsupported_type_without_starting(self):
         with tempfile.TemporaryDirectory() as directory:
