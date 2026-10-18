@@ -206,3 +206,14 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - Observed on the GitHub Actions runner: Docker daemon reachable (version `28.0.4`); `python:3.12-slim` image not cached; Podman probe timed out; user-namespace probe failed with `Operation not permitted`.
 - These results narrow the likely adapter to Docker, but do not yet establish candidate isolation. No image was pulled and no candidate code was executed.
 - Next gate: select and pin an approved image by immutable digest, then implement a Docker adapter that fails closed when the image or required flags are unavailable. Test resource limits, read-only workspace, network denial, credential exclusion, bounded output, timeout/cleanup, and exit evidence before enabling it for generated candidates.
+
+
+## SEQ K: fixed Docker command plan (builder implemented; execution deliberately disabled)
+
+- Added `build_docker_test_command()` to prepare a fixed argv vector for `python -m unittest discover` inside a Docker container. It never calls subprocess or Docker.
+- The builder requires a `sha256:<64 lowercase hex>` image digest and an existing absolute non-symlink workspace. Image tags such as `python:3.12-slim` are rejected.
+- The prepared command includes `--network=none`, `--read-only`, `--cap-drop=ALL`, `no-new-privileges`, PID/memory/CPU limits, a non-root UID, a bounded tmpfs, a read-only workspace mount, and disabled Python bytecode writes.
+- Registered `CORE-013` and added tests for required flags, immutable image reference format, workspace validation, task reachability, and the invariant that command preparation never executes code or grants authority.
+- Important limit: a constructed argv is not a sandbox proof. The image digest has not yet been selected or approved, the image is not cached in the observed CI runner, and no Docker container has been started by this feature.
+- Before any execution is enabled, a separate runtime adapter must enforce wall-clock timeout and stdout/stderr limits, verify the daemon/image, launch only the prepared fixed command, kill and clean up on timeout, and persist a receipt. Adversarial tests must verify network denial, read-only filesystem, no secrets, resource limits, and cleanup.
+- Evidence before exact-head CI: DESIGN = defined; IMPLEMENTED = added; REACHABLE = task dispatcher + `CORE-013`; RUNTIME = command preparation only, container execution not performed; PERSISTED = test output will be in CI artifact; AUDITED = source-level review; CI_PROVEN = pending.
