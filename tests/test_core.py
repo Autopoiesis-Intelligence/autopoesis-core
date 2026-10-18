@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from run_tasks import discover_tasks
+from run_tasks import discover_tasks, execute_task
 from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact
 
@@ -311,6 +311,37 @@ class EvolutionCoreTests(unittest.TestCase):
                     root,
                 )
 
+
+    def test_patch_task_pass_reports_that_generated_tests_were_not_run(self):
+        task = {
+            "id": "DISC-REPORT",
+            "type": "prepare_test_patch",
+            "source": "autopoesis/task_queue.py",
+        }
+        result = execute_task(task, ROOT / "TASK_QUEUE.json")
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(
+            result["verification"]["level"],
+            "PATCH_ARTIFACT_PREPARED_AND_VALIDATED",
+        )
+        self.assertFalse(result["verification"]["generated_code_executed"])
+        self.assertFalse(result["verification"]["tests_executed"])
+
+    def test_sandbox_task_pass_reports_application_not_test_execution(self):
+        task = {
+            "id": "DISC-REPORT-SANDBOX",
+            "type": "apply_test_patch_sandbox",
+            "source": "autopoesis/task_queue.py",
+        }
+        result = execute_task(task, ROOT / "TASK_QUEUE.json")
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(
+            result["verification"]["level"],
+            "PATCH_APPLIED_TO_DISPOSABLE_SANDBOX",
+        )
+        self.assertFalse(result["verification"]["generated_code_executed"])
+        self.assertFalse(result["verification"]["tests_executed"])
+        self.assertFalse(result["verification"]["repository_modified"])
 
 if __name__ == "__main__":
     unittest.main()
