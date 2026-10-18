@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -109,6 +111,26 @@ def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str =
         "at": timestamp,
     })
     return updated
+
+
+
+def _write_queue_atomically(path: Path, queue: dict[str, Any]) -> None:
+    """Replace the queue atomically so a process interruption cannot leave partial JSON."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(queue, indent=2, ensure_ascii=False) + "\\n"
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, path)
+    except Exception:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        finally:
+            raise
 
 
 def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str, Any]:
