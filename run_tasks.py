@@ -15,6 +15,7 @@ from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact
 from autopoesis.viability import MetricBound, ViabilityPolicy, evaluate_viability
 from autopoesis.evaluation import EvaluationPolicy, evaluate_transition
 from autopoesis.receipt_store import append_evaluation_receipt, append_record, load_journal
+from autopoesis.execution_policy import CandidateExecutionPolicy, assess_execution_policy
 
 
 ROOT = Path(__file__).resolve().parent
@@ -173,6 +174,44 @@ def verify_evaluation_receipt_persistence() -> dict[str, Any]:
         "fixtures_digest_present": "fixtures_digest" in receipt,
         "persisted_and_reloaded": True,
         "authority_boundary": "synthetic evaluation evidence only; not production execution or trusted evaluator authentication",
+    }
+
+
+
+def verify_candidate_execution_boundary() -> dict[str, Any]:
+    """Verify that incomplete execution requirements fail closed and complete declarations do not authorize execution."""
+    blocked = assess_execution_policy(None)
+    incomplete = assess_execution_policy(CandidateExecutionPolicy(
+        command_profile="arbitrary-shell",
+        timeout_seconds=0,
+        max_output_bytes=0,
+        network_disabled=False,
+        secrets_excluded=False,
+        filesystem_isolated=False,
+        os_sandbox_enforced=False,
+    ))
+    complete = assess_execution_policy(CandidateExecutionPolicy(
+        command_profile="python-unittest-v1",
+        timeout_seconds=30,
+        max_output_bytes=100_000,
+        network_disabled=True,
+        secrets_excluded=True,
+        filesystem_isolated=True,
+        os_sandbox_enforced=True,
+    ))
+    if blocked["status"] != "BLOCKED" or incomplete["status"] != "BLOCKED":
+        raise AssertionError("Incomplete execution policy did not fail closed")
+    if complete["status"] != "POLICY_COMPLETE_NOT_AUTHORIZED":
+        raise AssertionError("Declared policy incorrectly became execution authorization")
+    if any(result["execution_performed"] or result["execution_authorized"] for result in (blocked, incomplete, complete)):
+        raise AssertionError("Policy assessment must never execute or authorize candidate code")
+    return {
+        "status": "CHECKS_PASSED",
+        "missing_policy_blocked": True,
+        "incomplete_policy_blocked": True,
+        "complete_declaration_still_not_authorized": True,
+        "execution_performed": False,
+        "authority_boundary": "policy completeness only; no execution, OS isolation proof, or execution authority",
     }
 
 
