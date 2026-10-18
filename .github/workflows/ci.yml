@@ -165,9 +165,14 @@ jobs:
               raise SystemExit("Snapshot manifest run ID does not match verified source run")
           if manifest.get("source_head_sha") != source_sha:
               raise SystemExit("Snapshot manifest SHA does not match verified source run SHA")
-          snapshot_digest = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+          if manifest.get("source_repository") != provenance.get("source_repository"):
+              raise SystemExit("Snapshot manifest repository does not match verified source repository")
+          snapshot_bytes = snapshot.read_bytes()
+          snapshot_digest = hashlib.sha256(snapshot_bytes).hexdigest()
           if manifest.get("task_queue_sha256") != snapshot_digest:
               raise SystemExit("TASK_QUEUE.json SHA-256 does not match source snapshot manifest")
+          if manifest.get("task_queue_size_bytes") != len(snapshot_bytes):
+              raise SystemExit("TASK_QUEUE.json size does not match source snapshot manifest")
           load_queue(snapshot)
           shutil.copyfile(snapshot, "TASK_QUEUE.json")
           restored = Path("TASK_QUEUE.json")
