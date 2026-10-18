@@ -181,7 +181,7 @@ def record_verification_file(
     updated = json.loads(canonical_json(queue))
     updated["history"].append(event)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {"task_id": task_id, "verification_status": verification_status, "path": path.as_posix()}
 
 
