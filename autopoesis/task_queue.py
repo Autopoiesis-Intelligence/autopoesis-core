@@ -172,3 +172,52 @@ def record_task_result_file(
         "source_sha": source_sha,
         "path": path.as_posix(),
     }
+
+
+def select_next_task_file(path: Path) -> dict[str, Any]:
+    """Select one OPEN candidate deterministically; never execute it."""
+    queue = load_queue(path)
+    candidates = [item for item in queue["items"] if item.get("status") == "OPEN"]
+    if not candidates:
+        return {"status": "NO_OPEN_TASKS", "task_id": None, "path": path.as_posix()}
+
+    def rank(item: dict[str, Any]) -> tuple[int, int, str]:
+        priority = item.get("priority", 0)
+        if isinstance(priority, bool) or not isinstance(priority, int):
+            priority = 0
+        attempts = item.get("attempts", 0)
+        if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:
+            attempts = 0
+        return (-priority, attempts, item["id"])
+
+    selected = sorted(candidates, key=rank)[0]
+    task_id = selected["id"]
+    updated = record_outcome(queue, task_id, "SELECTED", "deterministic queue selection; not executed")
+    timestamp = datetime.now(timezone.utc).isoformat()
+    selected_item = next(item for item in updated["items"] if item["id"] == task_id)
+    priority = selected_item.get("priority", 0)
+    if isinstance(priority, bool) or not isinstance(priority, int):
+        priority = 0
+    attempts = selected_item.get("attempts", 0)
+    if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:
+        attempts = 0
+    updated["history"].append({
+        "event": "NEXT_TASK_SELECTED",
+        "task_id": task_id,
+        "selection_rule": "priority_desc_then_attempts_asc_then_task_id_asc",
+        "priority": priority,
+        "attempts": attempts,
+        "execution_started": False,
+        "at": timestamp,
+    })
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    return {
+        "status": "TASK_SELECTED",
+        "task_id": task_id,
+        "priority": priority,
+        "attempts": attempts,
+        "execution_started": False,
+        "selection_rule": "priority_desc_then_attempts_asc_then_task_id_asc",
+        "path": path.as_posix(),
+    }
