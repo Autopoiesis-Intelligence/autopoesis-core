@@ -226,6 +226,7 @@ def build_docker_test_command(
         "--tmpfs=/tmp:rw,noexec,nosuid,size=16m",
         "--mount", f"type=bind,src={workspace},dst=/workspace,readonly",
         "--workdir=/workspace",
+        "--env=PYTHONDONTWRITEBYTECODE=1",
         image,
         "python", "-m", "unittest", "discover", "-s", "/workspace/tests", "-v",
     ]
