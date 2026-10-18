@@ -165,7 +165,7 @@ jobs:
                   raise SystemExit("Restored DONE probe has no DONE transition in history")
               print("Synthetic DONE probe and its status history survived cross-run restore.")
           PY
-      - name: Test fixture: omit queue snapshot from artifact
+      - name: "Test fixture: omit queue snapshot from artifact"
         if: ${{ inputs.omit_queue_snapshot }}
         run: |
           rm -f TASK_QUEUE.json
