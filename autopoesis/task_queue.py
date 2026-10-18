@@ -116,3 +116,12 @@ def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str,
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result["queue"], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {"added": result["added"], "total": result["total"], "path": path.as_posix()}
+
+
+def record_outcome_file(path: Path, task_id: str, status: str, note: str = "") -> dict[str, Any]:
+    """Persist a status transition and its audit event to the queue file."""
+    queue = load_queue(path)
+    updated = record_outcome(queue, task_id, status, note)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    return {"task_id": task_id, "status": status, "path": path.as_posix()}
