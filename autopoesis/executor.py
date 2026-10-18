@@ -235,32 +235,14 @@ def verify_test_patch_in_sandbox(
         (workspace / "tests").mkdir()
         application = apply_patch_to_sandbox(artifact, workspace)
         generated_path = artifact["files"][0]["path"]
-        completed = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "unittest",
-                "discover",
-                "-s",
-                "tests",
-                "-p",
-                Path(generated_path).name,
-                "-v",
-            ],
-            cwd=workspace,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-        )
-        passed = completed.returncode == 0
-        return {
-            "verification_status": "PASS" if passed else "FAIL",
+        # Do not expose repository credentials or unrelated process environment to the child.
+        child_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPATH": str(workspace),
+        }
+        common_result = {
             "generated_test": generated_path,
-            "return_code": completed.returncode,
-            "stdout": completed.stdout[-4000:],
-            "stderr": completed.stderr[-4000:],
             "timeout_seconds": timeout_seconds,
             "artifact_sha256": artifact["artifact_sha256"],
             "sandbox_application": application,
@@ -268,7 +250,52 @@ def verify_test_patch_in_sandbox(
             "repository_modified": False,
             "generated_code_executed": True,
             "execution_boundary": "only the bounded generated import test in a temporary copied package",
+            "child_environment": "minimal allowlist; parent environment and credentials are not inherited",
             "sandbox_lifetime": "temporary; removed after the task",
+        }
+        try:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "unittest",
+                    "discover",
+                    "-s",
+                    "tests",
+                    "-p",
+                    Path(generated_path).name,
+                    "-v",
+                ],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+                env=child_env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            return {
+                **common_result,
+                "verification_status": "FAIL",
+                "failure_reason": "TIMEOUT",
+                "return_code": None,
+                "stdout": stdout[-4000:],
+                "stderr": stderr[-4000:],
+            }
+        passed = completed.returncode == 0
+        return {
+            **common_result,
+            "verification_status": "PASS" if passed else "FAIL",
+            "failure_reason": None if passed else "TEST_FAILURE",
+            "return_code": completed.returncode,
+            "stdout": completed.stdout[-4000:],
+            "stderr": completed.stderr[-4000:],
         }
 
 
