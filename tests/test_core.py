@@ -7,7 +7,7 @@ from pathlib import Path
 
 from autopoesis.core import EvolutionError, digest_state, evolve
 from run_tasks import discover_tasks
-from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, update_queue_file
+from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, record_task_result_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact, verify_test_patch_in_sandbox
 
 
@@ -46,6 +46,7 @@ class EvolutionCoreTests(unittest.TestCase):
                     str(ROOT / "run_tasks.py"),
                     "--tasks", str(task_file),
                     "--results", str(result_file),
+                    "--queue", str(Path(directory) / "TASK_QUEUE.json"),
                 ],
                 cwd=ROOT,
                 capture_output=True,
@@ -55,6 +56,10 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             result = json.loads(result_file.read_text(encoding="utf-8"))
             self.assertEqual(result["tasks"][0]["status"], "PASS")
+            queue = load_queue(Path(directory) / "TASK_QUEUE.json")
+            self.assertEqual(queue["history"][-1]["event"], "TASK_RESULT_RECORDED")
+            self.assertEqual(queue["history"][-1]["result_status"], "PASS")
+            self.assertEqual(len(queue["history"][-1]["evidence_sha256"]), 64)
 
 
     def test_discovery_finds_actionable_source_evidence(self):
@@ -287,6 +292,38 @@ class EvolutionCoreTests(unittest.TestCase):
                     root,
                     timeout_seconds=999,
                 )
+
+
+    def test_task_result_history_records_pass_and_fail_without_changing_lifecycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{
+                "id": "DISC-RESULT",
+                "type": "proposal",
+                "source": "autopoesis/example.py",
+                "evidence": "test result persistence",
+                "description": "Keep lifecycle independent from verification outcome.",
+            }])
+            record_outcome_file(path, "DISC-RESULT", "SELECTED", "selected for work")
+            record_task_result_file(
+                path,
+                "DISC-RESULT",
+                "FAIL",
+                {"failure_reason": "TEST_FAILURE", "return_code": 1, "stderr": "private output"},
+                run_at="2026-10-18T00:00:00+00:00",
+                source_sha="a" * 40,
+            )
+            queue = load_queue(path)
+            item = next(item for item in queue["items"] if item["id"] == "DISC-RESULT")
+            event = queue["history"][-1]
+            self.assertEqual(item["status"], "SELECTED")
+            self.assertEqual(event["event"], "TASK_RESULT_RECORDED")
+            self.assertEqual(event["result_status"], "FAIL")
+            self.assertEqual(event["failure_reason"], "TEST_FAILURE")
+            self.assertEqual(event["return_code"], 1)
+            self.assertEqual(event["source_sha"], "a" * 40)
+            self.assertEqual(len(event["evidence_sha256"]), 64)
+            self.assertNotIn("private output", json.dumps(queue))
 
 
 if __name__ == "__main__":
