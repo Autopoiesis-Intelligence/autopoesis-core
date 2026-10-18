@@ -223,8 +223,13 @@ def verify_test_patch_in_sandbox(
     root = repository_root.resolve()
     artifact = prepare_patch_artifact(task, root)
     source_package = root / "autopoesis"
+    if source_package.is_symlink():
+        raise ValueError("Refusing to copy a symlinked source package")
     if not source_package.is_dir():
         raise ValueError("Required autopoesis package is missing")
+    resolved_package = source_package.resolve()
+    if root not in resolved_package.parents:
+        raise ValueError("Source package must resolve inside the repository root")
     for path in source_package.rglob("*"):
         if path.is_symlink():
             raise ValueError("Refusing to copy a source package containing symlinks")
