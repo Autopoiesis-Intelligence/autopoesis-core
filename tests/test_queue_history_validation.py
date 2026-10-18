@@ -55,8 +55,6 @@ class QueueHistoryValidationTests(unittest.TestCase):
             }]))
 
     def test_rejects_non_string_queue_status(self):
-        with self.assertRaisesRegex(EvolutionError, "Invalid status"):
-            load_queue(self._write_queue([]) if False else self._write_queue([]))
         # The task status is independently validated before history records.
         path = self._write_queue([])
         payload = json.loads(path.read_text(encoding="utf-8"))
