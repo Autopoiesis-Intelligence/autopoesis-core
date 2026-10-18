@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -227,7 +229,7 @@ def verify_test_patch_in_sandbox(
         if path.is_symlink():
             raise ValueError("Refusing to copy a source package containing symlinks")
 
-    with __import__("tempfile").TemporaryDirectory(prefix="autopoesis-verify-") as directory:
+    with tempfile.TemporaryDirectory(prefix="autopoesis-verify-") as directory:
         workspace = Path(directory)
         shutil.copytree(source_package, workspace / "autopoesis", symlinks=True)
         (workspace / "tests").mkdir()
@@ -250,7 +252,7 @@ def verify_test_patch_in_sandbox(
             text=True,
             timeout=timeout_seconds,
             check=False,
-            env={**__import__("os").environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         )
         passed = completed.returncode == 0
         return {
