@@ -104,3 +104,12 @@ No task-file text may be interpreted as arbitrary shell commands or unrestricted
 ## Evidence status
 
 This document specifies intended behavior. It does not establish that any of the above is implemented, reachable, runtime-tested, persisted, audited, or CI-proven.
+
+
+## Implementation note: viability envelope
+
+A first domain-neutral implementation now exists in `autopoesis/viability.py`: `MetricBound`, `ViabilityPolicy`, and `evaluate_viability`. It requires caller-supplied metric functions and explicit bounds with units. It intentionally does not define a universal formula for `X`, `R`, entropy, or fitness.
+
+The viability gate's `ACCEPTED` result means only that the candidate's declared measurements fall within the configured envelope. It is not a fitness-improvement decision, a repository commit, or execution authority. A separate transition evaluation must still establish improvement; a separate gate must govern applying or committing a candidate.
+
+Evidence status for this addition: source and tests exist on the research branch; CI and runtime status must be checked against the exact branch HEAD. Receipts are not yet durably persisted.
