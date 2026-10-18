@@ -164,7 +164,7 @@ def record_task_result_file(
     queue = load_queue(path)
     queue.setdefault("history", []).append(event)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(queue, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    path.write_text(json.dumps(queue, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {
         "task_id": task_id,
         "result_status": status,
