@@ -12,6 +12,11 @@ on:
         required: false
         type: string
         default: ""
+      seed_done_probe:
+        description: "Seed a synthetic DONE queue item into this run's artifact for cross-run restore verification"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -103,6 +108,58 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
         run: python run_tasks.py
+      - name: Seed synthetic DONE probe for cross-run verification
+        if: ${{ inputs.seed_done_probe }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from autopoesis.task_queue import update_queue_file, record_outcome_file
+
+          queue_path = Path("TASK_QUEUE.json")
+          probe = {
+              "id": "CI-RESTORE-DONE-PROBE",
+              "type": "test_probe",
+              "source": ".github/workflows/ci.yml",
+              "evidence": "explicit workflow_dispatch seed for cross-run snapshot verification",
+              "description": "Synthetic verification item; not a production task.",
+          }
+          update_queue_file(queue_path, [probe])
+          record_outcome_file(
+              queue_path,
+              probe["id"],
+              "DONE",
+              "synthetic CI fixture for cross-run restore verification",
+          )
+          print("Seeded synthetic DONE probe into the artifact queue.")
+          PY
+      - name: Verify restored DONE probe when present
+        if: ${{ inputs.restore_run_id != '' }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from autopoesis.task_queue import load_queue
+
+          queue = load_queue(Path("TASK_QUEUE.json"))
+          probe = next(
+              (item for item in queue["items"] if item.get("id") == "CI-RESTORE-DONE-PROBE"),
+              None,
+          )
+          if probe is None:
+              print("No synthetic DONE probe in source snapshot; cross-run DONE check not exercised.")
+          else:
+              if probe.get("status") != "DONE":
+                  raise SystemExit(
+                      f"Restored DONE probe has unexpected status: {probe.get('status')!r}"
+                  )
+              matching_history = [
+                  event for event in queue["history"]
+                  if event.get("task_id") == "CI-RESTORE-DONE-PROBE"
+                  and event.get("to") == "DONE"
+              ]
+              if not matching_history:
+                  raise SystemExit("Restored DONE probe has no DONE transition in history")
+              print("Synthetic DONE probe and its status history survived cross-run restore.")
+          PY
       - name: Upload task results
         if: always()
         uses: actions/upload-artifact@v4
