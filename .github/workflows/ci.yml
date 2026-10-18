@@ -17,6 +17,11 @@ on:
         required: false
         type: boolean
         default: false
+      require_restore_probes:
+        description: "Fail restore verification unless both synthetic probes exist and match expected values"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -156,6 +161,8 @@ jobs:
               None,
           )
           if probe is None:
+              if ${{ inputs.require_restore_probes }}:
+                  raise SystemExit("Required synthetic DONE probe is missing from restored snapshot")
               print("No synthetic DONE probe in source snapshot; cross-run DONE check not exercised.")
           else:
               if probe.get("status") != "DONE":
@@ -192,6 +199,8 @@ jobs:
                       )
               print("Synthetic verification evidence and digest survived cross-run restore.")
           else:
+              if ${{ inputs.require_restore_probes }}:
+                  raise SystemExit("Required synthetic verification evidence is missing from restored snapshot")
               print("No synthetic verification evidence in source snapshot; evidence restore check not exercised.")
           PY
       - name: Upload task results
