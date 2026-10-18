@@ -12,10 +12,35 @@ from .core import EvolutionError, canonical_json
 
 QUEUE_VERSION = 1
 QUEUE_STATUSES = {"OPEN", "SELECTED", "IN_PROGRESS", "DONE", "REJECTED"}
+QUEUE_HISTORY_EVENTS = {"CANDIDATE_ADDED", "STATUS_CHANGED"}
 
 
 def empty_queue() -> dict[str, Any]:
     return {"version": QUEUE_VERSION, "items": [], "history": []}
+
+
+def _validate_history(history: list[Any]) -> None:
+    """Reject malformed or unsupported queue history records."""
+    for index, event in enumerate(history):
+        prefix = f"Invalid task queue history entry at index {index}"
+        if not isinstance(event, dict):
+            raise EvolutionError(f"{prefix}: expected an object")
+        event_type = event.get("event")
+        if event_type not in QUEUE_HISTORY_EVENTS:
+            raise EvolutionError(f"{prefix}: unsupported event type {event_type!r}")
+        task_id = event.get("task_id")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise EvolutionError(f"{prefix}: task_id must be a non-empty string")
+        timestamp = event.get("at")
+        if not isinstance(timestamp, str) or not timestamp.strip():
+            raise EvolutionError(f"{prefix}: at must be a non-empty string")
+        if event_type == "STATUS_CHANGED":
+            if event.get("from") not in QUEUE_STATUSES:
+                raise EvolutionError(f"{prefix}: invalid source status")
+            if event.get("to") not in QUEUE_STATUSES:
+                raise EvolutionError(f"{prefix}: invalid destination status")
+            if not isinstance(event.get("note"), str):
+                raise EvolutionError(f"{prefix}: note must be a string")
 
 
 def load_queue(path: Path) -> dict[str, Any]:
@@ -39,6 +64,7 @@ def load_queue(path: Path) -> dict[str, Any]:
         seen.add(item["id"])
         if item.get("status") not in QUEUE_STATUSES:
             raise EvolutionError(f"Invalid status for queued task {item['id']}")
+    _validate_history(queue["history"])
     return queue
 
 
