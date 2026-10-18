@@ -147,18 +147,35 @@ jobs:
           from pathlib import Path
           from autopoesis.task_queue import load_queue
 
-          snapshot = Path(".queue-restore/TASK_QUEUE.json")
-          if not snapshot.is_file():
-              raise SystemExit("Requested artifact does not contain TASK_QUEUE.json")
           import hashlib
           import json
 
+          snapshot = Path(".queue-restore/TASK_QUEUE.json")
+          manifest_path = Path(".queue-restore/QUEUE_SNAPSHOT_MANIFEST.json")
+          if not snapshot.is_file():
+              raise SystemExit("Requested artifact does not contain TASK_QUEUE.json")
+          if not manifest_path.is_file():
+              raise SystemExit("Requested artifact does not contain QUEUE_SNAPSHOT_MANIFEST.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          provenance_path = Path("QUEUE_RESTORE_PROVENANCE.json")
+          provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+          source_sha = provenance.get("source_head_sha")
+          source_run_id = str(provenance.get("source_run_id", ""))
+          if manifest.get("source_run_id") != source_run_id:
+              raise SystemExit("Snapshot manifest run ID does not match verified source run")
+          if manifest.get("source_head_sha") != source_sha:
+              raise SystemExit("Snapshot manifest SHA does not match verified source run SHA")
+          snapshot_digest = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+          if manifest.get("task_queue_sha256") != snapshot_digest:
+              raise SystemExit("TASK_QUEUE.json SHA-256 does not match source snapshot manifest")
           load_queue(snapshot)
           shutil.copyfile(snapshot, "TASK_QUEUE.json")
           restored = Path("TASK_QUEUE.json")
           load_queue(restored)
-          provenance_path = Path("QUEUE_RESTORE_PROVENANCE.json")
-          provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+          provenance["source_manifest_sha256"] = hashlib.sha256(
+              manifest_path.read_bytes()
+          ).hexdigest()
+          provenance["source_manifest_task_queue_sha256"] = manifest["task_queue_sha256"]
           provenance["restored_queue_sha256"] = hashlib.sha256(
               restored.read_bytes()
           ).hexdigest()
@@ -269,6 +286,33 @@ jobs:
                   raise SystemExit("Required synthetic verification evidence is missing from restored snapshot")
               print("No synthetic verification evidence in source snapshot; evidence restore check not exercised.")
           PY
+      - name: Create queue snapshot manifest
+        if: always() && hashFiles('TASK_QUEUE.json') != ''
+        env:
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          SOURCE_HEAD_SHA: ${{ github.sha }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          queue_path = Path("TASK_QUEUE.json")
+          manifest = {
+              "source_run_id": os.environ["SOURCE_RUN_ID"],
+              "source_head_sha": os.environ["SOURCE_HEAD_SHA"],
+              "source_repository": os.environ["SOURCE_REPOSITORY"],
+              "task_queue_sha256": hashlib.sha256(queue_path.read_bytes()).hexdigest(),
+              "task_queue_size_bytes": queue_path.stat().st_size,
+          }
+          Path("QUEUE_SNAPSHOT_MANIFEST.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\\n",
+              encoding="utf-8",
+          )
+          print("Created queue snapshot manifest for this run.")
+          PY
       - name: Upload task results
         if: always()
         uses: actions/upload-artifact@v4
@@ -278,4 +322,5 @@ jobs:
             RESULTS.json
             TASK_QUEUE.json
             QUEUE_RESTORE_PROVENANCE.json
+            QUEUE_SNAPSHOT_MANIFEST.json
           if-no-files-found: warn
