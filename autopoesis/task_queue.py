@@ -117,7 +117,7 @@ def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str =
 def _write_queue_atomically(path: Path, queue: dict[str, Any]) -> None:
     """Replace the queue atomically so a process interruption cannot leave partial JSON."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(queue, indent=2, ensure_ascii=False) + "\\n"
+    payload = json.dumps(queue, indent=2, ensure_ascii=False) + "\n"
     fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temporary_path = Path(temporary_name)
     try:
@@ -138,7 +138,7 @@ def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str,
     current = load_queue(path)
     result = merge_candidates(current, candidates)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(result["queue"], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_queue_atomically(path, result["queue"])
     return {"added": result["added"], "total": result["total"], "path": path.as_posix()}
 
 
@@ -147,7 +147,7 @@ def record_outcome_file(path: Path, task_id: str, status: str, note: str = "") -
     queue = load_queue(path)
     updated = record_outcome(queue, task_id, status, note)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_queue_atomically(path, updated)
     return {"task_id": task_id, "status": status, "path": path.as_posix()}
 
 
@@ -186,7 +186,7 @@ def record_task_result_file(
     queue = load_queue(path)
     queue.setdefault("history", []).append(event)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(queue, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_queue_atomically(path, queue)
     return {
         "task_id": task_id,
         "result_status": status,
@@ -233,7 +233,7 @@ def select_next_task_file(path: Path) -> dict[str, Any]:
         "at": timestamp,
     })
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_queue_atomically(path, updated)
     return {
         "status": "TASK_SELECTED",
         "task_id": task_id,
