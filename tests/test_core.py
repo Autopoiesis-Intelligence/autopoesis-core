@@ -665,5 +665,38 @@ class EvolutionCoreTests(unittest.TestCase):
                         load_queue(path)
 
 
+    def test_core_015_queue_loader_rejects_corrupt_snapshots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            invalid_snapshots = (
+                "{not-json",
+                json.dumps({"version": 1, "items": {}, "history": []}),
+                json.dumps({"version": 1, "items": [], "history": {}}),
+                json.dumps({
+                    "version": 1,
+                    "items": [
+                        {"id": "DUPLICATE", "status": "OPEN"},
+                        {"id": "DUPLICATE", "status": "OPEN"},
+                    ],
+                    "history": [],
+                }),
+                json.dumps({
+                    "version": 1,
+                    "items": [{"id": "BAD-STATUS", "status": "UNKNOWN"}],
+                    "history": [],
+                }),
+                json.dumps({
+                    "version": 1,
+                    "items": [{"id": 7, "status": "OPEN"}],
+                    "history": [],
+                }),
+            )
+            for snapshot in invalid_snapshots:
+                path.write_text(snapshot, encoding="utf-8")
+                with self.subTest(snapshot=snapshot):
+                    with self.assertRaises(EvolutionError):
+                        load_queue(path)
+
+
 if __name__ == "__main__":
     unittest.main()
