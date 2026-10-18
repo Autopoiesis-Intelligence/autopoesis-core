@@ -211,7 +211,7 @@ def select_next_task_file(path: Path) -> dict[str, Any]:
         "at": timestamp,
     })
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {
         "status": "TASK_SELECTED",
         "task_id": task_id,
