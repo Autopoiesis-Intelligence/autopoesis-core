@@ -42,7 +42,7 @@ def assess_execution_policy(policy: CandidateExecutionPolicy | None) -> dict[str
         }
 
     missing: list[str] = []
-    if policy.command_profile not in ALLOWED_COMMAND_PROFILES:
+    if not isinstance(policy.command_profile, str) or policy.command_profile not in ALLOWED_COMMAND_PROFILES:
         missing.append("allowlisted_command_profile")
     if isinstance(policy.timeout_seconds, bool) or not isinstance(policy.timeout_seconds, int) or not 1 <= policy.timeout_seconds <= 60:
         missing.append("timeout_seconds_1_to_60")
