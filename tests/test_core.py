@@ -446,7 +446,7 @@ class EvolutionCoreTests(unittest.TestCase):
             (root / "autopoesis").mkdir()
             (root / "tests").mkdir()
             source = root / "autopoesis" / "candidate.py"
-            source.write_text("VALUE = 7\\n", encoding="utf-8")
+            source.write_text("VALUE = 7\n", encoding="utf-8")
             queue_path = root / "TASK_QUEUE.json"
 
             discovery = discover_tasks(root)
@@ -475,7 +475,7 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertEqual(verification["return_code"], 0)
             self.assertFalse(verification["repository_modified"])
             self.assertFalse((root / "tests" / "test_candidate.py").exists())
-            self.assertEqual(source.read_text(encoding="utf-8"), "VALUE = 7\\n")
+            self.assertEqual(source.read_text(encoding="utf-8"), "VALUE = 7\n")
 
             record_task_result_file(
                 queue_path,
