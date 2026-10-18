@@ -398,6 +398,29 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertEqual(queue["history"][-1]["event"], "TASK_RESULT_RECORDED")
             self.assertEqual(queue["history"][-1]["result_status"], "PASS")
 
+    def test_selected_executor_persists_failure_when_handler_raises(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{
+                "id": "DISC-EXEC-FAIL",
+                "type": "prepare_test_patch",
+                "source": "autopoesis/does_not_exist.py",
+                "evidence": "failure persistence",
+                "description": "Must preserve failure evidence.",
+            }])
+            record_outcome_file(path, "DISC-EXEC-FAIL", "SELECTED", "selected for execution")
+            result = execute_selected_task({"type": "execute_selected_task"}, path)
+            self.assertEqual(result["status"], "FAIL")
+            self.assertTrue(result["execution_started"])
+            self.assertEqual(result["result"]["failure_reason"], "EXECUTION_ERROR")
+            queue = load_queue(path)
+            item = next(item for item in queue["items"] if item["id"] == "DISC-EXEC-FAIL")
+            self.assertEqual(item["status"], "IN_PROGRESS")
+            event = queue["history"][-1]
+            self.assertEqual(event["event"], "TASK_RESULT_RECORDED")
+            self.assertEqual(event["result_status"], "FAIL")
+            self.assertEqual(event["failure_reason"], "EXECUTION_ERROR")
+
     def test_runner_reports_blocked_selected_task_as_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "TASK_QUEUE.json"
