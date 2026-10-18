@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from autopoesis.task_queue import record_outcome_file, record_task_result_file, select_next_task_file, update_queue_file
+from autopoesis.task_queue import load_queue, record_outcome_file, record_task_result_file, select_next_task_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, verify_test_patch_in_sandbox
 
 
@@ -111,6 +111,56 @@ def discover_tasks(repository_root: Path) -> dict[str, Any]:
     }
 
 
+
+def execute_selected_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
+    """Execute only a selected, allowlisted queue item; proposals remain proposal-only."""
+    requested_id = task.get("task_id")
+    if requested_id is not None and (not isinstance(requested_id, str) or not requested_id.strip()):
+        raise ValueError("execute_selected_task task_id must be a non-empty string when provided")
+    queue = load_queue(queue_path)
+    selected = [
+        item for item in queue["items"]
+        if item.get("status") == "SELECTED"
+        and (requested_id is None or item.get("id") == requested_id)
+    ]
+    if len(selected) != 1:
+        raise ValueError("Expected exactly one SELECTED queue task; select a task first")
+    candidate = selected[0]
+    task_id = candidate["id"]
+    task_type = candidate.get("type")
+    if task_type != "proposal":
+        return {
+            "status": "BLOCKED",
+            "task_id": task_id,
+            "reason": "UNSUPPORTED_SELECTED_TASK_TYPE",
+            "task_type": task_type,
+            "execution_started": False,
+        }
+
+    record_outcome_file(queue_path, task_id, "IN_PROGRESS", "CORE-010 bounded executor started")
+    execution = execute_task({
+        "id": task_id,
+        "type": "proposal",
+        "description": candidate.get("description", ""),
+    }, queue_path)
+    record_task_result_file(
+        queue_path,
+        task_id,
+        execution["status"],
+        execution.get("result", {}),
+        source_sha=os.environ.get("GITHUB_SHA"),
+    )
+    return {
+        "status": execution["status"],
+        "task_id": task_id,
+        "task_type": task_type,
+        "execution_started": True,
+        "lifecycle_status_after_execution": "IN_PROGRESS",
+        "automatic_completion": False,
+        "result": execution.get("result", {}),
+    }
+
+
 def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
     task_id = task.get("id")
     task_type = task.get("type")
@@ -134,6 +184,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         result["discovered"] = discovery["candidate_count"]
     elif task_type == "select_next_task":
         result = select_next_task_file(queue_path)
+    elif task_type == "execute_selected_task":
+        result = execute_selected_task(task, queue_path)
     elif task_type == "update_task_status":
         target_id = task.get("task_id")
         status = task.get("status")
