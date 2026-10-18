@@ -59,6 +59,7 @@ class EvolutionCoreTests(unittest.TestCase):
             queue = load_queue(Path(directory) / "TASK_QUEUE.json")
             self.assertEqual(queue["history"][-1]["event"], "TASK_RESULT_RECORDED")
             self.assertEqual(queue["history"][-1]["result_status"], "PASS")
+            self.assertGreater(queue["history"][-1]["at"], result["run_at"])
             self.assertEqual(len(queue["history"][-1]["evidence_sha256"]), 64)
 
 
