@@ -86,13 +86,48 @@ jobs:
               "source_head_sha": source_sha,
               "source_conclusion": run.get("conclusion"),
           }
+          artifacts_response = __import__("subprocess").run(
+              [
+                  "gh", "api",
+                  f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{requested_run_id}/artifacts",
+              ],
+              check=True, capture_output=True, text=True,
+          )
+          artifacts_payload = json.loads(artifacts_response.stdout)
+          matches = [
+              artifact for artifact in artifacts_payload.get("artifacts", [])
+              if artifact.get("name") == "autopoesis-core-results"
+              and not artifact.get("expired", True)
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  "Source run must contain exactly one unexpired "
+                  "autopoesis-core-results artifact"
+              )
+          artifact = matches[0]
+          artifact_run = artifact.get("workflow_run") or {}
+          if str(artifact_run.get("id", "")) != requested_run_id:
+              raise SystemExit("Source artifact is not bound to the requested run")
+          if artifact_run.get("head_sha") != source_sha:
+              raise SystemExit("Source artifact head SHA does not match source run")
+          digest = artifact.get("digest")
+          if not isinstance(digest, str) or not digest.startswith("sha256:"):
+              raise SystemExit("Source artifact does not expose a SHA-256 archive digest")
+          provenance.update({
+              "source_artifact_id": artifact.get("id"),
+              "source_artifact_name": artifact.get("name"),
+              "source_artifact_digest": digest,
+              "source_artifact_size_bytes": artifact.get("size_in_bytes"),
+              "source_artifact_created_at": artifact.get("created_at"),
+          })
           Path("QUEUE_RESTORE_PROVENANCE.json").write_text(
-              json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+              json.dumps(provenance, indent=2, sort_keys=True) + "\\n",
               encoding="utf-8",
           )
           print(
               f"Verified source run {provenance['source_run_id']} "
-              f"at SHA {source_sha}."
+              f"at SHA {source_sha}; artifact {artifact.get('id')} "
+              f"with archive digest {digest}."
           )
           PY
       - name: Download prior queue snapshot
@@ -115,10 +150,27 @@ jobs:
           snapshot = Path(".queue-restore/TASK_QUEUE.json")
           if not snapshot.is_file():
               raise SystemExit("Requested artifact does not contain TASK_QUEUE.json")
+          import hashlib
+          import json
+
           load_queue(snapshot)
           shutil.copyfile(snapshot, "TASK_QUEUE.json")
-          load_queue(Path("TASK_QUEUE.json"))
-          print("Prior task queue snapshot restored and validated.")
+          restored = Path("TASK_QUEUE.json")
+          load_queue(restored)
+          provenance_path = Path("QUEUE_RESTORE_PROVENANCE.json")
+          provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+          provenance["restored_queue_sha256"] = hashlib.sha256(
+              restored.read_bytes()
+          ).hexdigest()
+          provenance["restored_queue_size_bytes"] = restored.stat().st_size
+          provenance_path.write_text(
+              json.dumps(provenance, indent=2, sort_keys=True) + "\\n",
+              encoding="utf-8",
+          )
+          print(
+              "Prior task queue snapshot restored and validated; "
+              f"queue SHA-256 {provenance['restored_queue_sha256']}."
+          )
           PY
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
