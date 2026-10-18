@@ -104,9 +104,10 @@ class TransitionEvaluationTests(unittest.TestCase):
 
     def test_callbacks_cannot_mutate_original_inputs(self):
         def mutating_evaluator(state, fixtures):
+            original_score = float(state["score"])
             state["score"] = 999
             fixtures["case"] = "mutated"
-            return float(state["score"])
+            return original_score
         receipt = self.evaluate(evaluator=mutating_evaluator)
         self.assertEqual(receipt["decision"], "ACCEPTED")
         self.assertEqual(self.parent, {"score": 1})
