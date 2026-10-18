@@ -26,7 +26,7 @@ def _validate_history(history: list[Any]) -> None:
         if not isinstance(event, dict):
             raise EvolutionError(f"{prefix}: expected an object")
         event_type = event.get("event")
-        if event_type not in QUEUE_HISTORY_EVENTS:
+        if not isinstance(event_type, str) or event_type not in QUEUE_HISTORY_EVENTS:
             raise EvolutionError(f"{prefix}: unsupported event type {event_type!r}")
         task_id = event.get("task_id")
         if not isinstance(task_id, str) or not task_id.strip():
@@ -35,9 +35,9 @@ def _validate_history(history: list[Any]) -> None:
         if not isinstance(timestamp, str) or not timestamp.strip():
             raise EvolutionError(f"{prefix}: at must be a non-empty string")
         if event_type == "STATUS_CHANGED":
-            if event.get("from") not in QUEUE_STATUSES:
+            if not isinstance(event.get("from"), str) or event.get("from") not in QUEUE_STATUSES:
                 raise EvolutionError(f"{prefix}: invalid source status")
-            if event.get("to") not in QUEUE_STATUSES:
+            if not isinstance(event.get("to"), str) or event.get("to") not in QUEUE_STATUSES:
                 raise EvolutionError(f"{prefix}: invalid destination status")
             if not isinstance(event.get("note"), str):
                 raise EvolutionError(f"{prefix}: note must be a string")
@@ -62,7 +62,7 @@ def load_queue(path: Path) -> dict[str, Any]:
         if item["id"] in seen:
             raise EvolutionError(f"Duplicate queued task id: {item['id']}")
         seen.add(item["id"])
-        if item.get("status") not in QUEUE_STATUSES:
+        if not isinstance(item.get("status"), str) or item.get("status") not in QUEUE_STATUSES:
             raise EvolutionError(f"Invalid status for queued task {item['id']}")
     _validate_history(queue["history"])
     return queue
