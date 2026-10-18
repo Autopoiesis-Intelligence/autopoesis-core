@@ -55,6 +55,33 @@ class QueueSnapshotValidationTests(unittest.TestCase):
                 {"version": 1, "items": [], "history": []},
             )
 
+    def test_generated_test_verification_is_persisted_without_marking_task_done(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            queue_path = root / "TASK_QUEUE.json"
+            tasks_path = root / "TASKS.json"
+            results_path = root / "RESULTS.json"
+            tasks_path.write_text(json.dumps({"tasks": [{
+                "id": "CORE-007-PERSIST",
+                "type": "verify_test_patch_sandbox",
+                "source": "autopoesis/task_queue.py",
+            }]}), encoding="utf-8")
+
+            self.assertEqual(run(tasks_path, results_path, queue_path), 0)
+            results = json.loads(results_path.read_text(encoding="utf-8"))
+            queue = load_queue(queue_path)
+
+            self.assertEqual(results["tasks"][0]["status"], "PASS")
+            self.assertTrue(results["tasks"][0]["result"]["generated_code_executed"])
+            self.assertEqual(len(queue["history"]), 1)
+            evidence = queue["history"][0]
+            self.assertEqual(evidence["event"], "VERIFICATION_RECORDED")
+            self.assertEqual(evidence["task_id"], "CORE-007-PERSIST")
+            self.assertEqual(evidence["verification_status"], "PASS")
+            self.assertEqual(evidence["verification_level"], "GENERATED_TEST_EXECUTION")
+            self.assertEqual(len(evidence["artifact_sha256"]), 64)
+            self.assertEqual(queue["items"], [])
+
     def test_status_and_history_survive_two_runner_invocations(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
