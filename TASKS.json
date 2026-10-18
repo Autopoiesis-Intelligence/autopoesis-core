@@ -38,6 +38,11 @@
       "type": "verify_test_patch_sandbox",
       "source": "autopoesis/task_queue.py",
       "description": "Generate a bounded import test, copy the package into a disposable workspace, execute only that generated test with a hard timeout, and report results without modifying repository files."
+    },
+    {
+      "id": "CORE-009",
+      "type": "select_next_task",
+      "description": "Select one OPEN task deterministically from TASK_QUEUE.json using explicit priority, attempt count, and task ID; persist the selection without executing the selected task."
     }
   ]
 }
