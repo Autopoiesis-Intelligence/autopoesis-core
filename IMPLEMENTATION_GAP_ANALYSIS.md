@@ -158,3 +158,14 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - The executor still validates patch hashes, path scope, and Python syntax, and can write artifacts into a temporary sandbox. It explicitly does not execute generated code.
 - Next implementation boundary: do not equate a subprocess with a secure sandbox. Before enabling candidate-code execution, define and test a fixed command allowlist, time and output limits, clean environment, disposable workspace, filesystem/network/credential isolation, and auditable exit evidence. If the host cannot enforce OS-level isolation, keep execution disabled and label the capability as bounded subprocess execution rather than secure isolation.
 - Status: exact-head CI = CI_PROVEN for the recorded SHA; candidate execution = NOT IMPLEMENTED; secure isolation = NOT PROVEN; autonomous self-improvement = NOT PROVEN.
+
+
+## SEQ H: fail-closed candidate execution policy contract (implementation added; CI pending)
+
+- Added `autopoesis/execution_policy.py` with an explicit policy shape: fixed command profile, bounded timeout, bounded output, and declared network, secret, filesystem, and OS-sandbox controls.
+- The policy assessor rejects absent or incomplete policies. The only currently recognized command profile is `python-unittest-v1`; arbitrary shell profiles are rejected.
+- A complete declaration returns `POLICY_COMPLETE_NOT_AUTHORIZED`, never permission to execute. The boolean isolation fields are caller declarations and do not prove that the operating system enforces those controls.
+- Added runner task `verify_candidate_execution_boundary`, registered as `CORE-010`, with tests for fail-closed behavior and task reachability.
+- No candidate code is executed by this sequence. No sandbox adapter, OS-level isolation, network denial, credential exclusion, resource enforcement, or execution receipt has been implemented.
+- Required next step: obtain CI on the exact resulting HEAD. After that, research the host's enforceable isolation options before implementing any executor. If isolation cannot be verified, candidate execution remains disabled.
+- Evidence status for this sequence before CI: DESIGN = defined; IMPLEMENTED = added; REACHABLE = wired into task runner; RUNTIME = pending CI; PERSISTED = not applicable to policy assessment; AUDITED = partial source review; CI_PROVEN = pending.
