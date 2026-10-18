@@ -319,3 +319,78 @@ Until these criteria are demonstrated, describe the repository as an **early sel
 ## Evidence note
 
 This review is a literature-informed design synthesis based on the linked public sources and the repository files inspected in this session. It is not an exhaustive systematic review, an independent reproduction of every paper, or evidence that the recommended mechanisms are implemented. Research references should be revisited before adoption, and each adopted mechanism should be justified by a concrete observed gap and a testable acceptance criterion.
+
+## Additional research: misevolution, process-level evaluation, and independent gates
+
+Research update: 2026-10-18. These sources sharpen the risk analysis beyond endpoint benchmark scores.
+
+### 15. Your Agent May Misevolve (ICLR 2026)
+
+Paper: https://arxiv.org/abs/2509.26354
+Code and experimental materials: https://github.com/ShaoShuai0605/Misevolution
+
+Type: empirical study of failure modes in self-evolving LLM agents.
+
+Finding: the authors study evolution across model, memory, tool, and workflow dimensions and report cases where adaptation causes undesirable changes, including degraded safety alignment after memory accumulation and vulnerabilities introduced through tool creation/reuse.
+
+Transfer: model evolution surfaces separately; require regression tests for every changed surface; treat newly generated tools and accumulated memory as potentially unsafe artifacts; retain parent versions and rollback paths.
+
+Limit: results concern the studied models, scenarios, and benchmarks; they do not quantify every risk in a repository-native system.
+
+### 16. Beyond Endpoint Performance: Process-Level Evaluation of Self-Evolving Agents (2026)
+
+Paper: https://arxiv.org/abs/2609.24663
+
+Type: benchmark and evaluation-method proposal for evolving memories/skills.
+
+Finding: endpoint scores alone can hide when capabilities appear, persist, or regress. The paper freezes artifacts at successive checkpoints and evaluates individual capabilities on held-out episodes. Its reported results include weaker transfer under distribution shift, retention losses on some paths, unreliable adaptation to new rules, and a gap between the best candidates generated and the updates ultimately selected.
+
+Transfer: add checkpointed capability-retention tests, held-out evaluation, distribution-shift probes, and records for rejected candidates. Measure the selection procedure itself, not only the winning candidate. This supports keeping an archive of candidate results and comparing the selected candidate against the best measured alternative.
+
+Limit: these are benchmark-specific findings; they motivate evaluation design rather than proving a universal failure rate.
+
+### 17. Self-Evolving Agents with Anytime-Valid Certificates (2026)
+
+Paper: https://arxiv.org/abs/2607.00871
+
+Type: proposed architecture for self-evolving agents with versioned gates and auditable certificates.
+
+Finding: the paper identifies a central endogeneity problem: an evolving policy can influence the data, evaluator, components, and hypothesis space used to judge itself. It proposes limiting the change surface and using versioned gates with explicit error budgets. The authors note that their reported evaluation is small and single-run, so variance and broader generalization remain open questions.
+
+Transfer: do not let a candidate change the evaluator or governance policy that judges that same candidate. Bind every decision to a specific evaluator/policy version and evidence set. Treat a receipt as an auditable record of a decision, not as a mathematical proof of correctness unless the certificate's assumptions and guarantees are actually established.
+
+Limit: this is a recent proposal with limited experiments, not a settled general solution.
+
+### 18. Why Do Multi-Agent LLM Systems Fail? (NeurIPS 2025)
+
+Paper: https://arxiv.org/abs/2503.13657
+Dataset/project: https://github.com/multi-agent-systems-failure-taxonomy/MAST
+
+Type: empirical failure analysis of multi-agent systems.
+
+Finding: the authors identify recurring failure modes involving system design/specification, inter-agent misalignment, and task verification/termination. Their study cautions against assuming that agent count or role assignment automatically improves reliability.
+
+Transfer: keep the Core loop single and minimal until a measured bottleneck justifies extra agents. If external agents are later used, specify typed input/output contracts, termination criteria, provenance, and an independent verification step.
+
+Limit: the study covers particular frameworks and tasks; it does not establish that every multi-agent design underperforms.
+
+## Revised architectural conclusions
+
+The new evidence reinforces five non-negotiable design rules:
+
+1. **Separate candidate generation from candidate authority.** Generated text, patches, tools, memories, and self-reported success are proposals/evidence, not permission to commit.
+2. **Keep the judge stable during the trial.** Candidate code must not silently redefine the metric, fixtures, invariants, or acceptance threshold used to evaluate it.
+3. **Evaluate trajectories, not only endpoints.** Preserve parent and candidate digests, intermediate receipts, failed attempts, test traces, and capability-retention results across checkpoints.
+4. **Measure both gain and damage.** A candidate that improves one score but violates invariants or regresses an existing capability must not be accepted solely on aggregate fitness.
+5. **Prefer reversible, small changes.** Use isolated workspaces, explicit change scopes, bounded execution, durable lineage, and rollback. Expand the change surface only after the smaller surface is proven.
+
+For the current repository, the practical next sequence remains: (A) harden the evaluator transition function and its contract tests; (B) define a small operational viability model; (C) build read-only gap hypotheses from state/history/evidence; (D) connect bounded generation to sandbox execution and independent verification; (E) persist lineage and receipts; (F) demonstrate the complete loop at an exact SHA with CI and runtime evidence.
+
+## Additional sources
+
+- Your Agent May Misevolve (ICLR 2026): https://arxiv.org/abs/2509.26354
+- Misevolution reference implementation: https://github.com/ShaoShuai0605/Misevolution
+- Beyond Endpoint Performance: https://arxiv.org/abs/2609.24663
+- Self-Evolving Agents with Anytime-Valid Certificates: https://arxiv.org/abs/2607.00871
+- Why Do Multi-Agent LLM Systems Fail?: https://arxiv.org/abs/2503.13657
+- MAST failure taxonomy and dataset: https://github.com/multi-agent-systems-failure-taxonomy/MAST
