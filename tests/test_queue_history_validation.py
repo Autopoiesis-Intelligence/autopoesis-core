@@ -74,6 +74,27 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "at": "2026-01-01T00:00:00+00:00",
             }]))
 
+    def test_rejects_broken_transition_chain_even_when_final_status_matches(self):
+        with self.assertRaisesRegex(EvolutionError, "transition chain mismatch"):
+            load_queue(self._write_queue([
+                {
+                    "event": "STATUS_CHANGED",
+                    "task_id": "TASK-1",
+                    "from": "OPEN",
+                    "to": "DONE",
+                    "note": "first transition",
+                    "at": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "event": "STATUS_CHANGED",
+                    "task_id": "TASK-1",
+                    "from": "OPEN",
+                    "to": "DONE",
+                    "note": "invalid second transition starts from old state",
+                    "at": "2026-01-01T00:00:01+00:00",
+                },
+            ]))
+
     def test_rejects_queue_status_that_contradicts_latest_history(self):
         with self.assertRaisesRegex(EvolutionError, "Queue status/history mismatch"):
             load_queue(self._write_queue([{
