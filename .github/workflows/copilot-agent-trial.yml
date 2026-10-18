@@ -81,25 +81,7 @@ jobs:
             echo "::error::Could not create expected patch (exit $diff_status)"
             exit 1
           }
-          if grep -nE '[[:blank:]]+
-          {
-            echo "## Bounded Copilot agent trial"
-            echo "- Task: one documentation-only queue-persistence note"
-            echo "- Changed path: AGENT_TRIAL.md"
-            echo "- Output bytes: $bytes"
-            echo "- GitHub write permission: none"
-            echo "- Automatic merge: none"
-            echo "- Patch saved as artifact; source branch was not pushed"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload review artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: copilot-bounded-agent-trial
-          path: agent-trial-output/
-          if-no-files-found: error
-          retention-days: 7
- AGENT_TRIAL.md; then
+          if grep -nE '[[:blank:]]+$' AGENT_TRIAL.md; then
             echo "::error::Generated file contains trailing whitespace"
             exit 1
           fi
