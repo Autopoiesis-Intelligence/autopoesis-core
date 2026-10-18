@@ -7,7 +7,7 @@ from pathlib import Path
 
 from autopoesis.core import EvolutionError, digest_state, evolve
 from run_tasks import discover_tasks
-from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, record_task_result_file, update_queue_file
+from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, record_task_result_file, select_next_task_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact, verify_test_patch_in_sandbox
 
 
@@ -324,6 +324,41 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertEqual(event["source_sha"], "a" * 40)
             self.assertEqual(len(event["evidence_sha256"]), 64)
             self.assertNotIn("private output", json.dumps(queue))
+
+
+    def test_next_task_selection_is_deterministic_and_does_not_execute(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [
+                {"id": "DISC-B", "type": "proposal", "source": "b.py", "evidence": "b", "description": "B", "priority": 3},
+                {"id": "DISC-A", "type": "proposal", "source": "a.py", "evidence": "a", "description": "A", "priority": 3},
+                {"id": "DISC-C", "type": "proposal", "source": "c.py", "evidence": "c", "description": "C", "priority": 9},
+            ])
+            selected = select_next_task_file(path)
+            self.assertEqual(selected["status"], "TASK_SELECTED")
+            self.assertEqual(selected["task_id"], "DISC-C")
+            self.assertFalse(selected["execution_started"])
+            queue = load_queue(path)
+            item = next(item for item in queue["items"] if item["id"] == "DISC-C")
+            self.assertEqual(item["status"], "SELECTED")
+            self.assertEqual(queue["history"][-1]["event"], "NEXT_TASK_SELECTED")
+            self.assertFalse(queue["history"][-1]["execution_started"])
+
+            # Once the highest-priority item is no longer OPEN, ties resolve by ID.
+            selected_again = select_next_task_file(path)
+            self.assertEqual(selected_again["task_id"], "DISC-A")
+            self.assertFalse(selected_again["execution_started"])
+
+    def test_next_task_selection_returns_empty_when_no_open_candidates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [
+                {"id": "DISC-DONE", "type": "proposal", "source": "d.py", "evidence": "done", "description": "Done"},
+            ])
+            record_outcome_file(path, "DISC-DONE", "DONE", "already completed")
+            result = select_next_task_file(path)
+            self.assertEqual(result["status"], "NO_OPEN_TASKS")
+            self.assertIsNone(result["task_id"])
 
 
 if __name__ == "__main__":
