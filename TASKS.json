@@ -62,6 +62,11 @@
       "id": "CORE-012",
       "type": "verify_isolation_runtime_probe",
       "description": "Run bounded fixed-command diagnostics for Docker daemon, Podman runtime, and user namespaces; never execute candidate code or claim sandbox verification."
+    },
+    {
+      "id": "CORE-013",
+      "type": "verify_docker_command_builder",
+      "description": "Validate preparation of a fixed, digest-pinned Docker test command with restrictive flags; do not invoke Docker or execute candidate code."
     }
   ]
 }
