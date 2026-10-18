@@ -234,3 +234,12 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - Added a fixed `podman image inspect docker.io/library/python:3.12-slim` probe. It does not pull images or execute candidate code.
 - The runtime report now distinguishes Podman rootless availability from whether the required Python image is cached in Podman's own image store. Docker and Podman image stores are not assumed to be shared.
 - CI artifact on the exact resulting HEAD must determine whether the candidate image is already available. No engine has been selected for execution yet.
+
+
+### SEQ L: exact-head runtime evidence
+
+- CI run #147, ID `39130291445`, completed SUCCESS on exact HEAD `0146315d04ee278ac3b2cd7aafdb3dbd17e8608a`; unit tests, file-based tasks, and artifact upload succeeded.
+- Downloaded artifact `autopoesis-core-results`, ID `12137434204`, and inspected `CORE-012`.
+- Docker daemon is reachable, but `python:3.12-slim` is not cached. Podman reports rootless mode enabled, but `docker.io/library/python:3.12-slim` is not cached in its separate image store. Direct `unshare` remains denied.
+- Both engines therefore need an explicitly reviewed, digest-pinned image before a runtime test. No image was pulled and no candidate code was executed.
+- Decision remains OPEN: prefer rootless Podman if its controls and command behavior can be verified; otherwise evaluate Docker with the daemon's trust boundary documented. Tool availability alone does not choose the safer runtime.
