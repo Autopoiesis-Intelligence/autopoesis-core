@@ -212,12 +212,9 @@ def build_docker_test_command(
     if not os.path.isdir(workspace) or os.path.islink(workspace):
         raise ValueError("Workspace must be an existing non-symlink directory")
 
-    docker = shutil.which("docker")
-    if not docker:
-        raise ValueError("Docker CLI is unavailable")
     image = f"python@{image_digest}"
     argv = [
-        docker, "run", "--rm",
+        "docker", "run", "--rm",
         "--network=none",
         "--read-only",
         "--cap-drop=ALL",
