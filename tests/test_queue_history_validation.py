@@ -74,6 +74,17 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "at": "2026-01-01T00:00:00+00:00",
             }]))
 
+    def test_rejects_queue_status_that_contradicts_latest_history(self):
+        with self.assertRaisesRegex(EvolutionError, "Queue status/history mismatch"):
+            load_queue(self._write_queue([{
+                "event": "STATUS_CHANGED",
+                "task_id": "TASK-1",
+                "from": "OPEN",
+                "to": "OPEN",
+                "note": "history claims OPEN",
+                "at": "2026-01-01T00:00:00+00:00",
+            }]))
+
     def test_rejects_non_string_transition_note(self):
         with self.assertRaisesRegex(EvolutionError, "note must be a string"):
             load_queue(self._write_queue([{
