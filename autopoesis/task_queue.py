@@ -12,7 +12,7 @@ from .core import EvolutionError, canonical_json
 
 QUEUE_VERSION = 1
 QUEUE_STATUSES = {"OPEN", "SELECTED", "IN_PROGRESS", "DONE", "REJECTED"}
-QUEUE_HISTORY_EVENTS = {"CANDIDATE_ADDED", "STATUS_CHANGED"}
+QUEUE_HISTORY_EVENTS = {"CANDIDATE_ADDED", "STATUS_CHANGED", "VERIFICATION_RECORDED"}
 
 
 def empty_queue() -> dict[str, Any]:
@@ -41,6 +41,19 @@ def _validate_history(history: list[Any]) -> None:
                 raise EvolutionError(f"{prefix}: invalid destination status")
             if not isinstance(event.get("note"), str):
                 raise EvolutionError(f"{prefix}: note must be a string")
+        if event_type == "VERIFICATION_RECORDED":
+            if event.get("verification_status") not in {"PASS", "FAIL"}:
+                raise EvolutionError(f"{prefix}: invalid verification status")
+            level = event.get("verification_level")
+            if not isinstance(level, str) or not level.strip():
+                raise EvolutionError(f"{prefix}: verification_level must be a non-empty string")
+            artifact_hash = event.get("artifact_sha256")
+            if artifact_hash is not None and (
+                not isinstance(artifact_hash, str)
+                or len(artifact_hash) != 64
+                or any(char not in "0123456789abcdef" for char in artifact_hash)
+            ):
+                raise EvolutionError(f"{prefix}: artifact_sha256 must be a lowercase SHA-256 hex digest")
 
 
 def load_queue(path: Path) -> dict[str, Any]:
@@ -133,6 +146,43 @@ def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str =
         "at": timestamp,
     })
     return updated
+
+
+def record_verification_file(
+    path: Path,
+    task_id: str,
+    verification_status: str,
+    verification_level: str,
+    artifact_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Persist a verification result as evidence without changing task lifecycle status."""
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise EvolutionError("Verification task_id must be a non-empty string")
+    if verification_status not in {"PASS", "FAIL"}:
+        raise EvolutionError(f"Unsupported verification status: {verification_status!r}")
+    if not isinstance(verification_level, str) or not verification_level.strip():
+        raise EvolutionError("Verification level must be a non-empty string")
+    if artifact_sha256 is not None and (
+        not isinstance(artifact_sha256, str)
+        or len(artifact_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in artifact_sha256)
+    ):
+        raise EvolutionError("artifact_sha256 must be a lowercase SHA-256 hex digest")
+
+    queue = load_queue(path)
+    event = {
+        "event": "VERIFICATION_RECORDED",
+        "task_id": task_id,
+        "verification_status": verification_status,
+        "verification_level": verification_level,
+        "artifact_sha256": artifact_sha256,
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    updated = json.loads(canonical_json(queue))
+    updated["history"].append(event)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    return {"task_id": task_id, "verification_status": verification_status, "path": path.as_posix()}
 
 
 def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str, Any]:
