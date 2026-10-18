@@ -86,8 +86,17 @@ def load_queue(path: Path) -> dict[str, Any]:
     # the persisted item status.
     latest_status: dict[str, str] = {}
     for event in queue["history"]:
-        if event.get("event") == "STATUS_CHANGED":
-            latest_status[event["task_id"]] = event["to"]
+        if event.get("event") != "STATUS_CHANGED":
+            continue
+        task_id = event["task_id"]
+        previous_destination = latest_status.get(task_id)
+        if previous_destination is not None and event["from"] != previous_destination:
+            raise EvolutionError(
+                f"Queue history transition chain mismatch for task {task_id!r}: "
+                f"next transition starts at {event['from']!r}, "
+                f"previous transition ended at {previous_destination!r}"
+            )
+        latest_status[task_id] = event["to"]
     for item in queue["items"]:
         task_id = item["id"]
         recorded_status = latest_status.get(task_id)
