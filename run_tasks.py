@@ -11,7 +11,7 @@ from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
 from autopoesis.task_queue import record_outcome_file, update_queue_file
-from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact
+from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, verify_test_patch_in_sandbox
 
 
 ROOT = Path(__file__).resolve().parent
@@ -140,6 +140,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         result = record_outcome_file(queue_path, target_id, status, note)
     elif task_type == "prepare_test_patch":
         result = prepare_patch_artifact(task, ROOT)
+    elif task_type == "verify_test_patch_sandbox":
+        result = verify_test_patch_in_sandbox(task, ROOT)
     elif task_type == "apply_test_patch_sandbox":
         artifact = prepare_patch_artifact(task, ROOT)
         with tempfile.TemporaryDirectory(prefix="autopoesis-patch-sandbox-") as directory:
@@ -152,10 +154,11 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
     else:
         raise ValueError(f"Unsupported task type: {task_type!r}")
 
+    task_status = "FAIL" if result.get("verification_status") == "FAIL" else "PASS"
     record: dict[str, Any] = {
         "id": task_id,
         "type": task_type,
-        "status": "PASS",
+        "status": task_status,
         "result": result,
     }
     if task_type == "prepare_test_patch":
