@@ -107,6 +107,58 @@ class BoundedTestScaffoldWriter:
         )
 
 
+
+def validate_patch_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+    """Validate hashes, generated-file scope, and Python syntax without executing code."""
+    if not isinstance(artifact, dict):
+        raise ValueError("Patch artifact must be an object")
+    claimed_artifact_hash = artifact.get("artifact_sha256")
+    if not isinstance(claimed_artifact_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", claimed_artifact_hash):
+        raise ValueError("Patch artifact has no valid artifact_sha256")
+
+    unsigned_payload = dict(artifact)
+    unsigned_payload.pop("artifact_sha256", None)
+    actual_artifact_hash = hashlib.sha256(canonical_json(unsigned_payload).encode("utf-8")).hexdigest()
+    if actual_artifact_hash != claimed_artifact_hash:
+        raise ValueError("Patch artifact checksum mismatch")
+
+    files = artifact.get("files")
+    if not isinstance(files, list) or not files:
+        raise ValueError("Patch artifact must contain at least one file")
+
+    seen_paths: set[str] = set()
+    for item in files:
+        if not isinstance(item, dict):
+            raise ValueError("Each patch file must be an object")
+        path_value = item.get("path")
+        content = item.get("content")
+        claimed_hash = item.get("sha256")
+        if not isinstance(path_value, str) or not isinstance(content, str):
+            raise ValueError("Patch file path and content must be strings")
+        path = Path(path_value)
+        if path.is_absolute() or ".." in path.parts or path.as_posix() != path_value:
+            raise ValueError("Patch file path must be normalized and repository-relative")
+        if len(path.parts) != 2 or path.parts[0] != "tests" or not path.name.startswith("test_") or path.suffix != ".py":
+            raise ValueError("Patch writer may only propose tests/test_*.py files")
+        if path_value in seen_paths:
+            raise ValueError("Patch artifact contains duplicate file paths")
+        seen_paths.add(path_value)
+        actual_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if claimed_hash != actual_hash:
+            raise ValueError(f"Patch file checksum mismatch: {path_value}")
+        try:
+            compile(content, path_value, "exec")
+        except SyntaxError as exc:
+            raise ValueError(f"Generated Python has invalid syntax: {path_value}: {exc.msg}") from exc
+
+    return {
+        "status": "VALID",
+        "files_checked": len(files),
+        "artifact_sha256": actual_artifact_hash,
+        "checks": ["artifact_sha256", "file_sha256", "allowed_path", "unique_paths", "python_syntax"],
+        "execution_performed": False,
+    }
+
 def prepare_patch_artifact(
     task: dict[str, Any],
     repository_root: Path,
@@ -117,4 +169,5 @@ def prepare_patch_artifact(
     result = selected_writer.prepare(task, repository_root)
     payload = result.to_dict()
     payload["artifact_sha256"] = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    payload["validation"] = validate_patch_artifact(payload)
     return payload
