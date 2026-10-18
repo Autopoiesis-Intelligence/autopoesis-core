@@ -119,6 +119,30 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "at": "2026-01-01T00:00:00+00:00",
             }]))
 
+    def test_rejects_non_string_persisted_verification_status(self):
+        with self.assertRaisesRegex(EvolutionError, "invalid verification status"):
+            load_queue(self._write_queue([{
+                "event": "VERIFICATION_RECORDED",
+                "task_id": "CORE-007",
+                "verification_status": ["PASS"],
+                "verification_level": "GENERATED_TEST_EXECUTION",
+                "artifact_sha256": None,
+                "at": "2026-01-01T00:00:00+00:00",
+            }]))
+
+    def test_verification_and_outcome_helpers_reject_non_string_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{
+                "id": "TASK-1",
+                "type": "proposal",
+                "description": "test",
+            }])
+            with self.assertRaisesRegex(EvolutionError, "Unsupported verification status"):
+                record_verification_file(path, "CORE-007", ["PASS"], "GENERATED_TEST_EXECUTION")
+            with self.assertRaisesRegex(EvolutionError, "Unsupported queue status"):
+                record_outcome_file(path, "TASK-1", ["DONE"], "invalid status type")
+
     def test_accepts_history_written_by_queue_helpers(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "TASK_QUEUE.json"
