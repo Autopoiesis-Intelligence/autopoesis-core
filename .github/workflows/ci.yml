@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -18,3 +19,10 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
         run: python run_tasks.py
+      - name: Upload task results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autopoesis-core-results
+          path: RESULTS.json
+          if-no-files-found: warn
