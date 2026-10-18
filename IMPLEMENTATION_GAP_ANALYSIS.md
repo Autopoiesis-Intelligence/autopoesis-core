@@ -169,3 +169,13 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - No candidate code is executed by this sequence. No sandbox adapter, OS-level isolation, network denial, credential exclusion, resource enforcement, or execution receipt has been implemented.
 - Required next step: obtain CI on the exact resulting HEAD. After that, research the host's enforceable isolation options before implementing any executor. If isolation cannot be verified, candidate execution remains disabled.
 - Evidence status for this sequence before CI: DESIGN = defined; IMPLEMENTED = added; REACHABLE = wired into task runner; RUNTIME = pending CI; PERSISTED = not applicable to policy assessment; AUDITED = partial source review; CI_PROVEN = pending.
+
+
+## SEQ I: host isolation-tool inventory (implementation added; CI pending)
+
+- Added `inspect_host_isolation_capabilities()` to `autopoesis/execution_policy.py`. It records the host platform, Python version, and paths of known candidate isolation tools found through executable lookup (`bwrap`, `firejail`, `nsjail`, `docker`, `podman`, `unshare`, `sandbox-exec`).
+- The inventory does not execute these tools or candidate code. Its status is always `NO_VERIFIED_SANDBOX`; discovered tool presence is explicitly not treated as proof of enforcement.
+- Added runner task `verify_host_isolation_inventory`, registered as `CORE-011`, and tests for its fail-closed semantics and task reachability.
+- Runtime inventory results must be read from the exact-head CI artifact/log before saying which tools are present in that runner. Presence alone still does not establish kernel support, permissions, effective network/filesystem restrictions, credential exclusion, or resource limits.
+- Current evidence before CI: DESIGN = defined; IMPLEMENTED = added; REACHABLE = wired into task runner; RUNTIME = pending exact-head CI; PERSISTED = task output is written by the normal runner to `RESULTS.json` and CI uploads it as an artifact, but artifact retrieval has not yet been checked; AUDITED = partial source review; CI_PROVEN = pending.
+- No candidate code is executed, and no execution authority is granted by this sequence.
