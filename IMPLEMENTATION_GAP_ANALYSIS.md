@@ -101,3 +101,13 @@ Added `autopoesis/viability.py` with `MetricBound`, `ViabilityPolicy`, and `eval
 - Tests in `tests/test_viability.py` cover explicit bounds, violations, missing evidence, invalid policies, non-finite values, and callback input isolation. These tests are authored but not yet CI-proven at the current head.
 
 Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHABLE = exported public API; RUNTIME = pending; PERSISTED = pending; AUDITED = partial source review; CI_PROVEN = pending for the current head.
+
+
+## SEQ C: viability gate wired into the file-based runner (CI pending)
+
+- Added `verify_viability_gate()` to `run_tasks.py`. It exercises one candidate that meets explicit bounds and one candidate that violates the memory bound.
+- Added task type `verify_viability_gate` to `execute_task` and registered `CORE-007` in `TASKS.json`.
+- Added tests for both decision outcomes and for reachability through the task dispatcher.
+- The runner reports this as a viability-only check. It explicitly does not grant fitness acceptance, code execution permission, or repository commit authority.
+- This demonstrates that the viability module is reachable through the configured file-task interface once CI passes. It does not demonstrate real process-memory measurement: the runner uses fixed synthetic state fields and an injected deterministic measurer.
+- Exact implementation head at the time of this note: pending confirmation after documentation commit. CI for the new runner integration is not yet observed.
