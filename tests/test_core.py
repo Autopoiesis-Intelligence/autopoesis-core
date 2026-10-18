@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from run_tasks import discover_tasks
+from run_tasks import discover_tasks, execute_task, verify_viability_gate
 from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact
 
@@ -255,6 +255,24 @@ class EvolutionCoreTests(unittest.TestCase):
                     {"id": "DISC-EXAMPLE", "source": "../outside.py"},
                     root,
                 )
+
+
+    def test_viability_gate_runner_task_checks_both_outcomes(self):
+        result = verify_viability_gate()
+        self.assertEqual(result["status"], "CHECKS_PASSED")
+        self.assertEqual(result["viable_candidate_decision"], "ACCEPTED")
+        self.assertEqual(result["unsafe_candidate_decision"], "REJECTED")
+        self.assertIn("no fitness", result["authority_boundary"])
+
+    def test_viability_gate_is_reachable_as_a_file_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            queue_path = Path(directory) / "TASK_QUEUE.json"
+            result = execute_task(
+                {"id": "test-viability", "type": "verify_viability_gate"},
+                queue_path,
+            )
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["result"]["status"], "CHECKS_PASSED")
 
 
 if __name__ == "__main__":
