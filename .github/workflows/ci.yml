@@ -150,8 +150,11 @@ jobs:
           PY
       - name: Verify restored DONE probe when present
         if: ${{ inputs.restore_run_id != '' }}
+        env:
+          REQUIRE_RESTORE_PROBES: ${{ inputs.require_restore_probes }}
         run: |
           python - <<'PY'
+          import os
           from pathlib import Path
           from autopoesis.task_queue import load_queue
 
@@ -161,7 +164,7 @@ jobs:
               None,
           )
           if probe is None:
-              if ${{ inputs.require_restore_probes }}:
+              if os.environ.get("REQUIRE_RESTORE_PROBES", "false").lower() == "true":
                   raise SystemExit("Required synthetic DONE probe is missing from restored snapshot")
               print("No synthetic DONE probe in source snapshot; cross-run DONE check not exercised.")
           else:
