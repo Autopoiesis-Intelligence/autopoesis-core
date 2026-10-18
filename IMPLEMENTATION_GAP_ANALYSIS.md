@@ -190,3 +190,10 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - The earlier CI artifact on SHA `c0675c224de1e14532b3a582f95a931eb52b22f3` showed executable paths for Docker, Podman, and `unshare`, but did not prove daemon/runtime access or sandbox enforcement. SEQ J must obtain a new exact-head CI artifact to observe those fixed probes.
 - No candidate execution is enabled. A future sandbox adapter must still be tested against filesystem escape, network access, credential visibility, process/resource exhaustion, and cleanup.
 - Evidence before CI: DESIGN = defined; IMPLEMENTED = added; REACHABLE = wired into runner; RUNTIME = pending exact-head CI; PERSISTED = task output is included in CI artifact when successful; AUDITED = partial source review; CI_PROVEN = pending.
+
+
+### SEQ J follow-up: Docker image readiness probe (implementation added; CI pending)
+
+- Added a fixed `docker image inspect python:3.12-slim` probe to determine whether the expected Python image is already present locally. The probe does not pull an image and does not run candidate code.
+- This separates three facts that must not be conflated: Docker CLI present, Docker daemon reachable, and a specific reviewed execution image available.
+- CI must report the exact-head result before selecting the execution image. If the image is absent, do not silently pull during a task run; decide explicitly how image provenance and availability are managed.
