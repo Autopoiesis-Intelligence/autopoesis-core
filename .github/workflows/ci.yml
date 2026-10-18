@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      restore_run_id:
+        description: "Optional prior successful CI run ID whose queue artifact should be restored"
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   test:
@@ -15,6 +24,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Restore queue snapshot from a prior run
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: autopoesis-core-results
+          path: .
+          run-id: ${{ inputs.restore_run_id }}
+          github-token: ${{ github.token }}
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
