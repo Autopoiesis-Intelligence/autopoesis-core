@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from run_tasks import discover_tasks
+from run_tasks import discover_tasks, execute_selected_task
 from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, record_task_result_file, select_next_task_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact, verify_test_patch_in_sandbox
 
@@ -359,6 +359,60 @@ class EvolutionCoreTests(unittest.TestCase):
             result = select_next_task_file(path)
             self.assertEqual(result["status"], "NO_OPEN_TASKS")
             self.assertIsNone(result["task_id"])
+
+
+    def test_selected_executor_runs_only_allowlisted_proposal_and_does_not_complete_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{
+                "id": "DISC-EXEC",
+                "type": "proposal",
+                "source": "autopoesis/example.py",
+                "evidence": "missing test",
+                "description": "Prepare a bounded test proposal.",
+            }])
+            record_outcome_file(path, "DISC-EXEC", "SELECTED", "chosen by selector")
+            result = execute_selected_task({"type": "execute_selected_task"}, path)
+            self.assertEqual(result["status"], "PASS")
+            self.assertTrue(result["execution_started"])
+            self.assertFalse(result["automatic_completion"])
+            self.assertEqual(result["lifecycle_status_after_execution"], "IN_PROGRESS")
+            queue = load_queue(path)
+            item = next(item for item in queue["items"] if item["id"] == "DISC-EXEC")
+            self.assertEqual(item["status"], "IN_PROGRESS")
+            self.assertEqual(queue["history"][-1]["event"], "TASK_RESULT_RECORDED")
+            self.assertEqual(queue["history"][-1]["result_status"], "PASS")
+
+    def test_selected_executor_blocks_unsupported_type_without_starting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{
+                "id": "DISC-BLOCKED",
+                "type": "arbitrary_shell",
+                "source": "ignored",
+                "evidence": "untrusted task type",
+                "description": "Must not execute.",
+            }])
+            record_outcome_file(path, "DISC-BLOCKED", "SELECTED", "test selection")
+            result = execute_selected_task({"type": "execute_selected_task"}, path)
+            self.assertEqual(result["status"], "BLOCKED")
+            self.assertFalse(result["execution_started"])
+            self.assertEqual(result["reason"], "UNSUPPORTED_SELECTED_TASK_TYPE")
+            item = load_queue(path)["items"][0]
+            self.assertEqual(item["status"], "SELECTED")
+
+    def test_selected_executor_requires_selected_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{
+                "id": "DISC-OPEN",
+                "type": "proposal",
+                "source": "x.py",
+                "evidence": "open",
+                "description": "Not selected yet.",
+            }])
+            with self.assertRaises(ValueError):
+                execute_selected_task({"type": "execute_selected_task"}, path)
 
 
 if __name__ == "__main__":
