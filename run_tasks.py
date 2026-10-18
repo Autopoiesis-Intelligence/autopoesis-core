@@ -93,10 +93,10 @@ def discover_tasks(repository_root: Path) -> dict[str, Any]:
             expected_test = repository_root / "tests" / f"test_{path.stem}.py"
             if not expected_test.exists():
                 candidate = {
-                    "type": "proposal",
+                    "type": "prepare_test_patch",
                     "source": relative,
                     "evidence": f"no conventional test file found at tests/test_{path.stem}.py",
-                    "description": f"Add focused tests for {relative}.",
+                    "description": f"Prepare a reviewable import-smoke-test patch for {relative}; do not apply it automatically.",
                 }
                 candidate["id"] = "DISC-" + digest_state(candidate)[:12]
                 candidates.append(candidate)
@@ -128,7 +128,14 @@ def execute_selected_task(task: dict[str, Any], queue_path: Path) -> dict[str, A
     candidate = selected[0]
     task_id = candidate["id"]
     task_type = candidate.get("type")
-    if task_type != "proposal":
+    allowed_types = {
+        "proposal",
+        "verify_evolution_cycle",
+        "prepare_test_patch",
+        "apply_test_patch_sandbox",
+        "verify_test_patch_sandbox",
+    }
+    if task_type not in allowed_types:
         return {
             "status": "BLOCKED",
             "task_id": task_id,
@@ -138,11 +145,16 @@ def execute_selected_task(task: dict[str, Any], queue_path: Path) -> dict[str, A
         }
 
     record_outcome_file(queue_path, task_id, "IN_PROGRESS", "CORE-010 bounded executor started")
-    execution = execute_task({
+    # Only copy the fields consumed by the allowlisted handlers. Queue descriptions
+    # cannot inject a handler, command, arbitrary arguments, or a repository path.
+    bounded_task = {
         "id": task_id,
-        "type": "proposal",
+        "type": task_type,
         "description": candidate.get("description", ""),
-    }, queue_path)
+    }
+    if task_type in {"prepare_test_patch", "apply_test_patch_sandbox", "verify_test_patch_sandbox"}:
+        bounded_task["source"] = candidate.get("source", "")
+    execution = execute_task(bounded_task, queue_path)
     record_task_result_file(
         queue_path,
         task_id,
