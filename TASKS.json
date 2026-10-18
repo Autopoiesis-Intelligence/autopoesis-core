@@ -52,6 +52,11 @@
       "id": "CORE-010",
       "type": "verify_candidate_execution_boundary",
       "description": "Verify candidate execution remains fail-closed: missing/incomplete requirements are blocked, and even a complete declaration grants no execution authority without a trusted OS isolation adapter."
+    },
+    {
+      "id": "CORE-011",
+      "type": "verify_host_isolation_inventory",
+      "description": "Inventory known host isolation tool executables without running them; report NO_VERIFIED_SANDBOX because presence alone does not prove effective OS isolation or authorize candidate execution."
     }
   ]
 }
