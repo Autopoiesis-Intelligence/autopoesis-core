@@ -184,3 +184,70 @@ def probe_isolation_runtime(timeout_seconds: int = 3, output_limit: int = 2048) 
         "sandbox_verified": False,
         "note": "Fixed read-only probes indicate runtime availability only; they do not prove a secure candidate sandbox.",
     }
+
+
+def build_docker_test_command(
+    *,
+    image_digest: str,
+    workspace: str,
+    policy: CandidateExecutionPolicy,
+) -> dict[str, Any]:
+    """Build (but never run) a fixed Docker test command after strict input validation.
+
+    The image must be pinned by sha256 digest. This function grants no execution
+    authority and does not prove the host's Docker daemon enforces these options.
+    """
+    import os
+    import re
+
+    if not isinstance(policy, CandidateExecutionPolicy):
+        raise ValueError("A typed execution policy is required")
+    assessment = assess_execution_policy(policy)
+    if assessment["status"] != "POLICY_COMPLETE_NOT_AUTHORIZED":
+        raise ValueError("Execution policy is incomplete")
+    if not isinstance(image_digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
+        raise ValueError("Image must be pinned to an immutable sha256 digest")
+    if not isinstance(workspace, str) or not os.path.isabs(workspace):
+        raise ValueError("Workspace must be an absolute path")
+    if not os.path.isdir(workspace) or os.path.islink(workspace):
+        raise ValueError("Workspace must be an existing non-symlink directory")
+
+    docker = shutil.which("docker")
+    if not docker:
+        raise ValueError("Docker CLI is unavailable")
+    image = f"python@{image_digest}"
+    argv = [
+        docker, "run", "--rm",
+        "--network=none",
+        "--read-only",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges:true",
+        "--pids-limit=64",
+        "--memory=256m",
+        "--cpus=1",
+        "--user=65532:65532",
+        "--tmpfs=/tmp:rw,noexec,nosuid,size=16m",
+        "--mount", f"type=bind,src={workspace},dst=/workspace,readonly",
+        "--workdir=/workspace",
+        image,
+        "python", "-m", "unittest", "discover", "-s", "/workspace/tests", "-v",
+    ]
+    return {
+        "status": "COMMAND_PREPARED_NOT_EXECUTED",
+        "argv": argv,
+        "timeout_seconds": policy.timeout_seconds,
+        "max_output_bytes": policy.max_output_bytes,
+        "shell": False,
+        "candidate_code_executed": False,
+        "execution_authorized": False,
+        "sandbox_verified": False,
+        "required_runtime_checks": [
+            "image_digest_is_approved_and_present_locally",
+            "workspace_contains_only_reviewed_candidate_and_required_tests",
+            "docker_daemon_is_trusted_and_reachable",
+            "network_denial_is_verified",
+            "secret_exclusion_is_verified",
+            "resource_limits_and_cleanup_are_verified",
+            "stdout_and_stderr_are_bounded_by_the_future_runner",
+        ],
+    }
