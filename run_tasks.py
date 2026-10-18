@@ -15,7 +15,7 @@ from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact
 from autopoesis.viability import MetricBound, ViabilityPolicy, evaluate_viability
 from autopoesis.evaluation import EvaluationPolicy, evaluate_transition
 from autopoesis.receipt_store import append_evaluation_receipt, append_record, load_journal
-from autopoesis.execution_policy import CandidateExecutionPolicy, assess_execution_policy, inspect_host_isolation_capabilities
+from autopoesis.execution_policy import CandidateExecutionPolicy, assess_execution_policy, inspect_host_isolation_capabilities, probe_isolation_runtime
 
 
 ROOT = Path(__file__).resolve().parent
@@ -228,6 +228,19 @@ def verify_host_isolation_inventory() -> dict[str, Any]:
     return result
 
 
+
+def verify_isolation_runtime_probe() -> dict[str, Any]:
+    """Run fixed, bounded host capability probes; never run generated candidate code."""
+    result = probe_isolation_runtime()
+    if result.get("status") != "CAPABILITY_PROBE_ONLY":
+        raise AssertionError("Runtime probe must remain diagnostic only")
+    if result.get("candidate_code_executed") is not False:
+        raise AssertionError("Runtime probe must not execute candidate code")
+    if result.get("execution_authorized") is not False or result.get("sandbox_verified") is not False:
+        raise AssertionError("Runtime probe must not grant authority or claim sandbox verification")
+    return result
+
+
 def create_agent_proposal(description: str) -> dict[str, Any]:
     return {
         "status": "PROPOSAL_ONLY",
@@ -313,6 +326,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         result = verify_candidate_execution_boundary()
     elif task_type == "verify_host_isolation_inventory":
         result = verify_host_isolation_inventory()
+    elif task_type == "verify_isolation_runtime_probe":
+        result = verify_isolation_runtime_probe()
     elif task_type == "proposal":
         description = task.get("description", "")
         if not isinstance(description, str):
