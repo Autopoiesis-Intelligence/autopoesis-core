@@ -47,7 +47,7 @@
     {
       "id": "CORE-010",
       "type": "execute_selected_task",
-      "description": "Execute exactly one SELECTED queue item only if its type is allowlisted; currently proposal-only tasks are supported. Record result, preserve IN_PROGRESS for review, and never auto-complete the task."
+      "description": "Execute exactly one SELECTED queue item using a fixed allowlist of proposal, evolution verification, patch preparation, and sandbox patch verification/application handlers. Record the result, preserve IN_PROGRESS for review, and never auto-complete the task."
     }
   ]
 }
