@@ -15,6 +15,11 @@
       "id": "CORE-003",
       "type": "discover_tasks",
       "description": "Inspect repository Python sources for TODO/FIXME/HACK markers and source modules lacking conventional tests; report evidence-backed candidates without modifying files."
+    },
+    {
+      "id": "CORE-004",
+      "type": "queue_discovered_tasks",
+      "description": "Discover repository improvement candidates and merge them into the persistent TASK_QUEUE.json without duplicating existing candidates or overwriting their statuses."
     }
   ]
 }
