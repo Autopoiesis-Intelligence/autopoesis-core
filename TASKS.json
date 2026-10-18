@@ -42,6 +42,11 @@
       "id": "CORE-008",
       "type": "verify_decision_journal",
       "description": "Verify local decision journal persistence, hash-chain validation, and tamper detection using temporary synthetic records; this does not authenticate evaluators or prove execution."
+    },
+    {
+      "id": "CORE-009",
+      "type": "verify_evaluation_receipt_persistence",
+      "description": "Evaluate a synthetic parent/candidate transition, persist the resulting evaluation receipt, reload it, and verify that decision, policy/evaluator identity, state digests, and fixture digest are preserved."
     }
   ]
 }
