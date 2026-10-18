@@ -280,6 +280,21 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertIn("Ran 1 test", result["stderr"])
             self.assertFalse((root / "tests" / "test_example.py").exists())
 
+    def test_sandbox_verification_rejects_symlinked_package_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "real_package"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "example.py").write_text("VALUE = 1\\n", encoding="utf-8")
+            (root / "autopoesis").symlink_to(package, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "symlinked source package"):
+                verify_test_patch_in_sandbox(
+                    {"id": "DISC-SYMLINK", "source": "autopoesis/example.py"},
+                    root,
+                )
+
+
     def test_sandbox_verification_rejects_unbounded_timeout(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
