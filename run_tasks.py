@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
+from autopoesis.task_queue import update_queue_file
 
 
 ROOT = Path(__file__).resolve().parent
@@ -107,7 +108,7 @@ def discover_tasks(repository_root: Path) -> dict[str, Any]:
     }
 
 
-def execute_task(task: dict[str, Any]) -> dict[str, Any]:
+def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
     task_id = task.get("id")
     task_type = task.get("type")
 
@@ -123,13 +124,18 @@ def execute_task(task: dict[str, Any]) -> dict[str, Any]:
         result = create_agent_proposal(description)
     elif task_type == "discover_tasks":
         result = discover_tasks(ROOT)
+    elif task_type == "queue_discovered_tasks":
+        discovery = discover_tasks(ROOT)
+        result = update_queue_file(queue_path, discovery["candidates"])
+        result["discovery_status"] = discovery["status"]
+        result["discovered"] = discovery["candidate_count"]
     else:
         raise ValueError(f"Unsupported task type: {task_type!r}")
 
     return {"id": task_id, "type": task_type, "status": "PASS", "result": result}
 
 
-def run(tasks_path: Path, results_path: Path) -> int:
+def run(tasks_path: Path, results_path: Path, queue_path: Path = Path("TASK_QUEUE.json")) -> int:
     timestamp = datetime.now(timezone.utc).isoformat()
     output: dict[str, Any] = {
         "version": 1,
@@ -151,7 +157,7 @@ def run(tasks_path: Path, results_path: Path) -> int:
             if isinstance(task_id, str):
                 seen_ids.add(task_id)
             try:
-                output["tasks"].append(execute_task(task))
+                output["tasks"].append(execute_task(task, queue_path))
             except Exception as exc:
                 output["tasks"].append({
                     "id": task_id,
@@ -180,8 +186,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tasks", type=Path, default=Path("TASKS.json"))
     parser.add_argument("--results", type=Path, default=Path("RESULTS.json"))
+    parser.add_argument("--queue", type=Path, default=Path("TASK_QUEUE.json"))
     args = parser.parse_args()
-    return run(args.tasks, args.results)
+    return run(args.tasks, args.results, args.queue)
 
 
 if __name__ == "__main__":
