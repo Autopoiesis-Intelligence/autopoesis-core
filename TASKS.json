@@ -47,6 +47,11 @@
       "id": "CORE-009",
       "type": "verify_evaluation_receipt_persistence",
       "description": "Evaluate a synthetic parent/candidate transition, persist the resulting evaluation receipt, reload it, and verify that decision, policy/evaluator identity, state digests, and fixture digest are preserved."
+    },
+    {
+      "id": "CORE-010",
+      "type": "verify_candidate_execution_boundary",
+      "description": "Verify candidate execution remains fail-closed: missing/incomplete requirements are blocked, and even a complete declaration grants no execution authority without a trusted OS isolation adapter."
     }
   ]
 }
