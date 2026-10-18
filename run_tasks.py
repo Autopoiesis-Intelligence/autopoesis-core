@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from autopoesis.task_queue import update_queue_file
+from autopoesis.task_queue import record_outcome_file, update_queue_file
 
 
 ROOT = Path(__file__).resolve().parent
@@ -129,6 +129,13 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         result = update_queue_file(queue_path, discovery["candidates"])
         result["discovery_status"] = discovery["status"]
         result["discovered"] = discovery["candidate_count"]
+    elif task_type == "update_task_status":
+        target_id = task.get("task_id")
+        status = task.get("status")
+        note = task.get("note", "")
+        if not isinstance(target_id, str) or not isinstance(status, str) or not isinstance(note, str):
+            raise ValueError("update_task_status requires string task_id, status, and optional note")
+        result = record_outcome_file(queue_path, target_id, status, note)
     else:
         raise ValueError(f"Unsupported task type: {task_type!r}")
 
