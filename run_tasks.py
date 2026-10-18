@@ -294,7 +294,6 @@ def run(tasks_path: Path, results_path: Path, queue_path: Path = Path("TASK_QUEU
                         task_id,
                         task_result["status"],
                         task_result.get("result", {}),
-                        run_at=timestamp,
                         source_sha=os.environ.get("GITHUB_SHA"),
                     )
                     task_result["persisted_evidence"] = evidence
