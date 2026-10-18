@@ -81,6 +81,23 @@ The evaluation prototype has since been extended on the research branch. This se
 - Tests were added for empty invariants, transition-aware homeostasis, callback mutation isolation, state size/depth bounds, and the improvement threshold boundary.
 - The decision receipt remains an in-memory object; durable receipt persistence is still not implemented.
 - Callback copying does not prove purity, determinism, resource isolation, or that the callable actually matches the declared evaluator ID/version. Those remain explicit trust/evidence gaps.
-- The latest observed CI run was run #79, associated with an earlier commit (`ebf00fcb08863cfa4b95bf9ef76ec159066e86bb`): **FAIL**, 34 tests, 2 failures. The failures were the callback-mutation test expectation and the depth-bound test. Follow-up commits `5c8c4bccd856eeec1961d3e64798bf9be51fed4c` and `9d06d09151b23f9a464134df8372ede080b6a678` addressed those two cases, but no CI run has yet been observed for the newer head. Do not infer that the fixes pass until CI reruns.
+- CI run #81 on exact head `ff518806d05986a2ce2eafb4519056bc51936456` completed **SUCCESS**: unit tests and file-based tasks passed. Run: https://github.com/Autopoiesis-Intelligence/autopoesis-core/actions/runs/39128614451.
+- A later viability implementation was added after that CI run. Its current head must receive its own CI run; run #81 does not cover those later files.
 
 Next evidence requirement: obtain a CI run for the exact current branch head, inspect its result, and then run an end-to-end runtime demonstration separately. A passing unit suite alone would not establish durable receipts, isolated execution, or a complete self-evolution loop.
+
+
+## SEQ B: explicit viability-envelope prototype (implementation added; CI pending)
+
+Added `autopoesis/viability.py` with `MetricBound`, `ViabilityPolicy`, and `evaluate_viability`.
+
+- Every metric must have a name, ID, version, unit, and at least one explicit minimum/maximum bound.
+- The policy must contain at least one uniquely named metric; no default metric, X/R formula, entropy score, or fitness objective is invented.
+- The supplied measurer evaluates both parent and candidate. Non-finite/non-numeric values, missing policy/measurer, malformed policy, or callback errors return `UNRESOLVED`.
+- A candidate outside any declared bound returns `REJECTED`; otherwise it returns `ACCEPTED` for the viability gate only. This is not final candidate acceptance, fitness improvement, execution permission, or commit authority.
+- Parent measurements are recorded for comparison. The parent may already be outside the envelope; a candidate can pass this gate if it satisfies all declared bounds, which permits a move back into a viable region.
+- Inputs are passed to the measurement callback as defensive copies. This does not prove callback purity, determinism, or resource isolation.
+- The returned receipt is currently in memory; durable receipt storage and end-to-end runtime proof remain missing.
+- Tests in `tests/test_viability.py` cover explicit bounds, violations, missing evidence, invalid policies, non-finite values, and callback input isolation. These tests are authored but not yet CI-proven at the current head.
+
+Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHABLE = exported public API; RUNTIME = pending; PERSISTED = pending; AUDITED = partial source review; CI_PROVEN = pending for the current head.
