@@ -99,6 +99,7 @@ class TransitionEvaluationTests(unittest.TestCase):
             expected_parent_digest=digest_state({"error": 0.8}),
             policy=policy,
             evaluator=lambda state, fixtures: state["error"],
+            invariants=(lambda state: "error" in state,),
         )
         self.assertEqual(receipt["decision"], "ACCEPTED")
         self.assertAlmostEqual(receipt["improvement"], 0.3)
