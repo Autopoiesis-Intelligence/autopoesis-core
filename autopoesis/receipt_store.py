@@ -114,3 +114,40 @@ def append_record(path: str | Path, record: dict[str, Any]) -> dict[str, Any]:
             pass
         raise
     return entry
+
+def append_evaluation_receipt(
+    path: str | Path,
+    receipt: dict[str, Any],
+    *,
+    receipt_id: str,
+) -> dict[str, Any]:
+    """Persist a receipt returned by evaluate_transition with a typed journal record.
+
+    This validates the receipt's shape, not the truthfulness of its claims or the
+    identity of the callable that produced it.
+    """
+    required = {
+        "schema_version",
+        "candidate_id",
+        "parent_state_digest",
+        "candidate_state_digest",
+        "evaluation_policy_id",
+        "evaluation_policy_version",
+        "evaluator_id",
+        "evaluator_version",
+        "decision",
+        "reason",
+    }
+    if not isinstance(receipt, dict) or not required.issubset(receipt):
+        missing = sorted(required - set(receipt)) if isinstance(receipt, dict) else sorted(required)
+        raise JournalIntegrityError(f"Evaluation receipt is missing required fields: {missing}")
+    if receipt.get("schema_version") != 1:
+        raise JournalIntegrityError("Unsupported evaluation receipt schema.")
+    if receipt.get("decision") not in {"ACCEPTED", "REJECTED", "UNRESOLVED"}:
+        raise JournalIntegrityError("Evaluation receipt has an invalid decision.")
+    record = {
+        "receipt_id": receipt_id,
+        "receipt_type": "evaluation_transition",
+        **receipt,
+    }
+    return append_record(path, record)
