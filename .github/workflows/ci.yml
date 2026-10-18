@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      restore_run_id:
+        description: "Optional prior successful CI run ID whose autopoesis-core-results artifact contains TASK_QUEUE.json"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   test:
@@ -15,6 +25,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Download prior queue snapshot
+        if: ${{ inputs.restore_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: autopoesis-core-results
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.restore_run_id }}
+          path: .queue-restore
+      - name: Validate and install prior queue snapshot
+        if: ${{ inputs.restore_run_id != '' }}
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+          from autopoesis.task_queue import load_queue
+
+          snapshot = Path(".queue-restore/TASK_QUEUE.json")
+          if not snapshot.is_file():
+              raise SystemExit("Requested artifact does not contain TASK_QUEUE.json")
+          load_queue(snapshot)
+          shutil.copyfile(snapshot, "TASK_QUEUE.json")
+          load_queue(Path("TASK_QUEUE.json"))
+          print("Prior task queue snapshot restored and validated.")
+          PY
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
