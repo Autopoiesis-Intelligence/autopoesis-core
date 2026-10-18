@@ -14,7 +14,7 @@ from autopoesis.task_queue import record_outcome_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact
 from autopoesis.viability import MetricBound, ViabilityPolicy, evaluate_viability
 from autopoesis.evaluation import EvaluationPolicy, evaluate_transition
-from autopoesis.receipt_store import append_record, load_journal
+from autopoesis.receipt_store import append_evaluation_receipt, append_record, load_journal
 
 
 ROOT = Path(__file__).resolve().parent
@@ -157,10 +157,10 @@ def verify_evaluation_receipt_persistence() -> dict[str, Any]:
 
     with tempfile.TemporaryDirectory(prefix="autopoesis-evaluation-journal-") as directory:
         path = Path(directory) / "decisions.json"
-        entry = append_record(path, {"receipt_id": "evaluation-smoke-1", **receipt})
+        entry = append_evaluation_receipt(path, receipt, receipt_id="evaluation-smoke-1")
         restored = load_journal(path)
         persisted = restored["entries"][0]["record"]
-        if persisted != {"receipt_id": "evaluation-smoke-1", **receipt}:
+        if persisted != {**receipt, "receipt_id": "evaluation-smoke-1", "receipt_type": "evaluation_transition"}:
             raise AssertionError("Persisted evaluation receipt differs from source receipt")
         if entry["entry_digest"] != restored["entries"][0]["entry_digest"]:
             raise AssertionError("Persisted entry digest mismatch")
