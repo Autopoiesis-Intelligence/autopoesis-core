@@ -179,3 +179,14 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - Runtime inventory results must be read from the exact-head CI artifact/log before saying which tools are present in that runner. Presence alone still does not establish kernel support, permissions, effective network/filesystem restrictions, credential exclusion, or resource limits.
 - Current evidence before CI: DESIGN = defined; IMPLEMENTED = added; REACHABLE = wired into task runner; RUNTIME = pending exact-head CI; PERSISTED = task output is written by the normal runner to `RESULTS.json` and CI uploads it as an artifact, but artifact retrieval has not yet been checked; AUDITED = partial source review; CI_PROVEN = pending.
 - No candidate code is executed, and no execution authority is granted by this sequence.
+
+
+## SEQ J: bounded host isolation runtime probes (implementation added; CI pending)
+
+- Extended the host diagnostic with fixed, non-shell probes for Docker daemon reachability, Podman runtime availability, and user-namespace support.
+- Each probe has a 1–5 second timeout, bounded captured output, and a minimal environment. Arguments are hard-coded; task text cannot supply a command or arguments.
+- These probes do not execute generated candidate code. They test whether selected host facilities respond, not whether an adversarial workload is safely contained.
+- Added runner task `verify_isolation_runtime_probe`, registered as `CORE-012`, and tests for diagnostic-only semantics, bounded parameters, and task reachability.
+- The earlier CI artifact on SHA `c0675c224de1e14532b3a582f95a931eb52b22f3` showed executable paths for Docker, Podman, and `unshare`, but did not prove daemon/runtime access or sandbox enforcement. SEQ J must obtain a new exact-head CI artifact to observe those fixed probes.
+- No candidate execution is enabled. A future sandbox adapter must still be tested against filesystem escape, network access, credential visibility, process/resource exhaustion, and cleanup.
+- Evidence before CI: DESIGN = defined; IMPLEMENTED = added; REACHABLE = wired into runner; RUNTIME = pending exact-head CI; PERSISTED = task output is included in CI artifact when successful; AUDITED = partial source review; CI_PROVEN = pending.
