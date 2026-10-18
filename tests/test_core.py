@@ -275,5 +275,55 @@ class EvolutionCoreTests(unittest.TestCase):
         self.assertEqual(result["result"]["status"], "CHECKS_PASSED")
 
 
+    def test_decision_journal_round_trip_and_hash_chain(self):
+        from autopoesis.receipt_store import append_record, load_journal
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "audit" / "decisions.json"
+            first = append_record(path, {
+                "receipt_id": "receipt-1",
+                "decision": "ACCEPTED",
+                "parent_state_digest": "a" * 64,
+                "candidate_state_digest": "b" * 64,
+                "evaluator_id": "test-evaluator",
+                "evaluator_version": "1",
+            })
+            second = append_record(path, {
+                "receipt_id": "receipt-2",
+                "decision": "REJECTED",
+                "parent_state_digest": "b" * 64,
+                "candidate_state_digest": "c" * 64,
+            })
+            journal = load_journal(path)
+            self.assertEqual(len(journal["entries"]), 2)
+            self.assertEqual(first["sequence"], 1)
+            self.assertEqual(second["sequence"], 2)
+            self.assertEqual(second["previous_digest"], first["entry_digest"])
+
+    def test_decision_journal_detects_tampering(self):
+        from autopoesis.receipt_store import JournalIntegrityError, append_record, load_journal
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "decisions.json"
+            append_record(path, {"receipt_id": "receipt-1", "decision": "ACCEPTED"})
+            journal = json.loads(path.read_text(encoding="utf-8"))
+            journal["entries"][0]["record"]["decision"] = "REJECTED"
+            path.write_text(json.dumps(journal), encoding="utf-8")
+            with self.assertRaises(JournalIntegrityError):
+                load_journal(path)
+
+    def test_decision_journal_rejects_duplicate_and_malformed_records(self):
+        from autopoesis.receipt_store import JournalIntegrityError, append_record
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "decisions.json"
+            append_record(path, {"receipt_id": "receipt-1", "decision": "ACCEPTED"})
+            with self.assertRaises(JournalIntegrityError):
+                append_record(path, {"receipt_id": "receipt-1", "decision": "REJECTED"})
+            with self.assertRaises(JournalIntegrityError):
+                append_record(path, {"decision": "MISSING_ID"})
+
+
+
 if __name__ == "__main__":
     unittest.main()
