@@ -113,7 +113,11 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          from autopoesis.task_queue import update_queue_file, record_outcome_file
+          from autopoesis.task_queue import (
+              update_queue_file,
+              record_outcome_file,
+              record_verification_file,
+          )
 
           queue_path = Path("TASK_QUEUE.json")
           probe = {
@@ -130,7 +134,14 @@ jobs:
               "DONE",
               "synthetic CI fixture for cross-run restore verification",
           )
-          print("Seeded synthetic DONE probe into the artifact queue.")
+          record_verification_file(
+              queue_path,
+              "CI-RESTORE-VERIFICATION-PROBE",
+              "PASS",
+              "CI_SYNTHETIC_PERSISTENCE_PROBE",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          )
+          print("Seeded synthetic DONE and verification-evidence probes into the artifact queue.")
           PY
       - name: Verify restored DONE probe when present
         if: ${{ inputs.restore_run_id != '' }}
@@ -159,6 +170,29 @@ jobs:
               if not matching_history:
                   raise SystemExit("Restored DONE probe has no DONE transition in history")
               print("Synthetic DONE probe and its status history survived cross-run restore.")
+
+          verification = next(
+              (
+                  event for event in queue["history"]
+                  if event.get("event") == "VERIFICATION_RECORDED"
+                  and event.get("task_id") == "CI-RESTORE-VERIFICATION-PROBE"
+              ),
+              None,
+          )
+          if verification is not None:
+              expected = {
+                  "verification_status": "PASS",
+                  "verification_level": "CI_SYNTHETIC_PERSISTENCE_PROBE",
+                  "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              }
+              for key, value in expected.items():
+                  if verification.get(key) != value:
+                      raise SystemExit(
+                          f"Restored verification evidence field {key!r} mismatch"
+                      )
+              print("Synthetic verification evidence and digest survived cross-run restore.")
+          else:
+              print("No synthetic verification evidence in source snapshot; evidence restore check not exercised.")
           PY
       - name: Upload task results
         if: always()
