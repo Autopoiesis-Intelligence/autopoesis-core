@@ -57,6 +57,11 @@
       "id": "CORE-011",
       "type": "verify_host_isolation_inventory",
       "description": "Inventory known host isolation tool executables without running them; report NO_VERIFIED_SANDBOX because presence alone does not prove effective OS isolation or authorize candidate execution."
+    },
+    {
+      "id": "CORE-012",
+      "type": "verify_isolation_runtime_probe",
+      "description": "Run bounded fixed-command diagnostics for Docker daemon, Podman runtime, and user namespaces; never execute candidate code or claim sandbox verification."
     }
   ]
 }
