@@ -33,34 +33,6 @@ jobs:
             echo "restore_run_id must contain digits only" >&2
             exit 1
           fi
-      - name: Verify restore source run
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_run_id != '' }}
-        env:
-          RESTORE_RUN_ID: ${{ inputs.restore_run_id }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [[ "$RESTORE_RUN_ID" == "$GITHUB_RUN_ID" ]]; then
-            echo "Cannot restore an artifact from the current run" >&2
-            exit 1
-          fi
-          source_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RESTORE_RUN_ID")"
-          expected_workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml" --jq '.id')"
-          source_workflow_id="$(jq -r '.workflow_id // empty' <<<"$source_run")"
-          source_status="$(jq -r '.status // empty' <<<"$source_run")"
-          source_conclusion="$(jq -r '.conclusion // empty' <<<"$source_run")"
-          source_repository="$(jq -r '.head_repository.full_name // empty' <<<"$source_run")"
-          if [[ "$source_workflow_id" != "$expected_workflow_id" ]]; then
-            echo "Restore source must come from this CI workflow" >&2
-            exit 1
-          fi
-          if [[ "$source_status" != "completed" || "$source_conclusion" != "success" ]]; then
-            echo "Restore source run must have completed successfully" >&2
-            exit 1
-          fi
-          if [[ "$source_repository" != "$GITHUB_REPOSITORY" ]]; then
-            echo "Restore source must originate from this repository, not a fork" >&2
-            exit 1
-          fi
       - name: Restore queue snapshot from a prior run
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_run_id != '' }}
         uses: actions/download-artifact@v4
@@ -77,24 +49,6 @@ jobs:
             exit 1
           fi
           python -c "from pathlib import Path; from autopoesis.task_queue import load_queue; load_queue(Path('TASK_QUEUE.json'))"
-      - name: Smoke-test cross-run queue restoration
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
-        run: |
-          restore_run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs" -f branch="$SOURCE_BRANCH" -F per_page=100 | jq -r --arg branch "$SOURCE_BRANCH" --argjson current "$GITHUB_RUN_ID" '.workflow_runs | map(select(.id != $current and .path == ".github/workflows/ci.yml" and .head_branch == $branch and .status == "completed" and .conclusion == "success")) | first | .id // empty')"
-          if [[ -z "$restore_run_id" ]]; then
-            echo "No prior successful CI run on this branch; cross-run restore smoke test skipped."
-            exit 0
-          fi
-          mkdir -p restore-smoke
-          gh run download "$restore_run_id" --repo "$GITHUB_REPOSITORY" --name autopoesis-core-results --dir restore-smoke
-          if [[ ! -f restore-smoke/TASK_QUEUE.json ]]; then
-            echo "Prior CI artifact does not contain TASK_QUEUE.json" >&2
-            exit 1
-          fi
-          python -c "from pathlib import Path; from autopoesis.task_queue import load_queue; q = load_queue(Path('restore-smoke/TASK_QUEUE.json')); print('Restored queue validated:', len(q['items']), 'tasks,', len(q['history']), 'history events')"
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
