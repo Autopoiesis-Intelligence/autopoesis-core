@@ -46,14 +46,33 @@ jobs:
               raise SystemExit(
                   f"Source run must have conclusion=success; got {run.get('conclusion')!r}"
               )
-          if run.get("path") != ".github/workflows/ci.yml":
+          workflow_path = str(run.get("path", "")).split("@", 1)[0]
+          if workflow_path != ".github/workflows/ci.yml":
               raise SystemExit(
                   f"Source run must use .github/workflows/ci.yml; got {run.get('path')!r}"
               )
           repository = run.get("repository", {}).get("full_name")
           if repository != os.environ["GITHUB_REPOSITORY"]:
               raise SystemExit("Source run belongs to a different repository")
-          print("Source CI run is successful and belongs to this repository/workflow.")
+          source_sha = run.get("head_sha")
+          if not isinstance(source_sha, str) or len(source_sha) != 40:
+              raise SystemExit("Source run does not expose a valid 40-character head SHA")
+          provenance = {
+              "source_run_id": run.get("id"),
+              "source_run_url": run.get("html_url"),
+              "source_repository": repository,
+              "source_workflow_path": workflow_path,
+              "source_head_sha": source_sha,
+              "source_conclusion": run.get("conclusion"),
+          }
+          Path("QUEUE_RESTORE_PROVENANCE.json").write_text(
+              json.dumps(provenance, indent=2, sort_keys=True) + "\\n",
+              encoding="utf-8",
+          )
+          print(
+              f"Verified source run {provenance['source_run_id']} "
+              f"at SHA {source_sha}."
+          )
           PY
       - name: Download prior queue snapshot
         if: ${{ inputs.restore_run_id != '' }}
@@ -92,4 +111,5 @@ jobs:
           path: |
             RESULTS.json
             TASK_QUEUE.json
+            QUEUE_RESTORE_PROVENANCE.json
           if-no-files-found: warn
