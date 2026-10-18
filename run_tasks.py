@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from autopoesis.task_queue import record_outcome_file, update_queue_file
+from autopoesis.task_queue import record_outcome_file, record_task_result_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, verify_test_patch_in_sandbox
 
 
@@ -180,14 +181,29 @@ def run(tasks_path: Path, results_path: Path, queue_path: Path = Path("TASK_QUEU
             if isinstance(task_id, str):
                 seen_ids.add(task_id)
             try:
-                output["tasks"].append(execute_task(task, queue_path))
+                task_result = execute_task(task, queue_path)
             except Exception as exc:
-                output["tasks"].append({
+                task_result = {
                     "id": task_id,
                     "type": task.get("type"),
                     "status": "FAIL",
                     "error": f"{type(exc).__name__}: {exc}",
-                })
+                }
+            if isinstance(task_id, str) and task_id.strip():
+                try:
+                    evidence = record_task_result_file(
+                        queue_path,
+                        task_id,
+                        task_result["status"],
+                        task_result.get("result", {}),
+                        run_at=timestamp,
+                        source_sha=os.environ.get("GITHUB_SHA"),
+                    )
+                    task_result["persisted_evidence"] = evidence
+                except Exception as exc:
+                    task_result["status"] = "FAIL"
+                    task_result["persistence_error"] = f"{type(exc).__name__}: {exc}"
+            output["tasks"].append(task_result)
     except Exception as exc:
         output["error"] = f"{type(exc).__name__}: {exc}"
         results_path.parent.mkdir(parents=True, exist_ok=True)
