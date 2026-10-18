@@ -77,6 +77,25 @@ jobs:
             exit 1
           fi
           python -c "from pathlib import Path; from autopoesis.task_queue import load_queue; load_queue(Path('TASK_QUEUE.json'))"
+      - name: Smoke-test cross-run queue restoration
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml" --jq '.id')"
+          restore_run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs" -f branch="$SOURCE_BRANCH" -F per_page=100 --jq ".workflow_runs[] | select(.id != ($GITHUB_RUN_ID|tonumber)) | select(.workflow_id == ($workflow_id|tonumber)) | select(.head_branch == \"$SOURCE_BRANCH\") | select(.status == \"completed\" and .conclusion == \"success\") | .id" | head -n 1)"
+          if [[ -z "$restore_run_id" ]]; then
+            echo "No prior successful CI run on this branch; cross-run restore smoke test skipped."
+            exit 0
+          fi
+          mkdir -p restore-smoke
+          gh run download "$restore_run_id" --repo "$GITHUB_REPOSITORY" --name autopoesis-core-results --dir restore-smoke
+          if [[ ! -f restore-smoke/TASK_QUEUE.json ]]; then
+            echo "Prior CI artifact does not contain TASK_QUEUE.json" >&2
+            exit 1
+          fi
+          python -c "from pathlib import Path; from autopoesis.task_queue import load_queue; q = load_queue(Path('restore-smoke/TASK_QUEUE.json')); print('Restored queue validated:', len(q['items']), 'tasks,', len(q['history']), 'history events')"
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
