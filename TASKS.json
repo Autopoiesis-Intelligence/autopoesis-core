@@ -26,6 +26,12 @@
       "type": "prepare_test_patch",
       "source": "autopoesis/task_queue.py",
       "description": "Generate a reviewable import-smoke-test patch for the task queue module; do not apply or execute the patch."
+    },
+    {
+      "id": "CORE-006",
+      "type": "apply_test_patch_sandbox",
+      "source": "autopoesis/task_queue.py",
+      "description": "Generate and apply the bounded import-test patch inside a disposable sandbox; do not modify repository files or execute generated code."
     }
   ]
 }
