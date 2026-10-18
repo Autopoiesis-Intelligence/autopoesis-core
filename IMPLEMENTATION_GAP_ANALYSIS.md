@@ -111,3 +111,14 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - The runner reports this as a viability-only check. It explicitly does not grant fitness acceptance, code execution permission, or repository commit authority.
 - This demonstrates that the viability module is reachable through the configured file-task interface once CI passes. It does not demonstrate real process-memory measurement: the runner uses fixed synthetic state fields and an injected deterministic measurer.
 - Exact implementation head at the time of this note: pending confirmation after documentation commit. CI for the new runner integration is not yet observed.
+
+
+## SEQ D: persistent decision journal (implementation added; CI pending)
+
+- Added `autopoesis/receipt_store.py` with a versioned JSON snapshot, sequential entries, unique receipt IDs, canonical JSON digests, and a SHA-256 previous-entry chain.
+- Writes use a temporary file in the same directory followed by `os.replace`, so readers should see either the previous or replacement snapshot rather than a partially written JSON document under ordinary local-filesystem semantics.
+- Loading verifies schema version, sequence numbers, unique IDs, previous-digest links, and each entry digest. Tampering with a record without recomputing the chain is detected.
+- The public API is exported from `autopoesis`; tests cover round-trip persistence, hash-chain linkage, tampering, duplicate IDs, and missing IDs.
+- Explicit limits: this is integrity-evident, not tamper-proof; an actor who can rewrite the entire journal can recompute the hashes. The implementation assumes a single writer and does not claim cross-process locking, fsync-level durability, trusted timestamps, or external anchoring.
+- The journal stores caller-supplied decision records; it does not itself authenticate evaluator identity or prove that a decision's claimed checks actually ran.
+- Current exact branch head and CI must be checked after these commits. Passing tests would prove this implementation's tested behavior, not production persistence guarantees or end-to-end autonomous evolution.
