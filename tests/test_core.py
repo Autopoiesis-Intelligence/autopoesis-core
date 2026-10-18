@@ -371,5 +371,36 @@ class EvolutionCoreTests(unittest.TestCase):
 
 
 
+    def test_decision_journal_survives_independent_processes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "decisions.json"
+            writer = (
+                "from autopoesis.receipt_store import append_record; "
+                "import sys; "
+                "append_record(sys.argv[1], {'receipt_id':'cross-process-1',"
+                "'decision':'ACCEPTED','evidence_scope':'test'})"
+            )
+            writer_result = subprocess.run(
+                [sys.executable, "-c", writer, str(path)],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(writer_result.returncode, 0, writer_result.stderr)
+
+            reader = (
+                "from autopoesis.receipt_store import load_journal; "
+                "import json,sys; "
+                "print(json.dumps(load_journal(sys.argv[1])['entries'][0]['record']))"
+            )
+            reader_result = subprocess.run(
+                [sys.executable, "-c", reader, str(path)],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(reader_result.returncode, 0, reader_result.stderr)
+            restored = json.loads(reader_result.stdout)
+            self.assertEqual(restored["receipt_id"], "cross-process-1")
+            self.assertEqual(restored["decision"], "ACCEPTED")
+
+
+
 if __name__ == "__main__":
     unittest.main()
