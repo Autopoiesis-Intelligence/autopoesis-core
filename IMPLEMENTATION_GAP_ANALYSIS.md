@@ -122,3 +122,14 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - Explicit limits: this is integrity-evident, not tamper-proof; an actor who can rewrite the entire journal can recompute the hashes. The implementation assumes a single writer and does not claim cross-process locking, fsync-level durability, trusted timestamps, or external anchoring.
 - The journal stores caller-supplied decision records; it does not itself authenticate evaluator identity or prove that a decision's claimed checks actually ran.
 - Current exact branch head and CI must be checked after these commits. Passing tests would prove this implementation's tested behavior, not production persistence guarantees or end-to-end autonomous evolution.
+
+
+## SEQ E: evaluation receipt connected to durable journal (implementation added; CI pending)
+
+- Added runner task `verify_evaluation_receipt_persistence` and registered it as `CORE-009`.
+- The task calls the actual `evaluate_transition` function with a synthetic parent/candidate pair, explicit policy, invariant, homeostasis check, evaluator, and fixtures.
+- It persists the resulting receipt, reloads the journal, and checks that the full receipt survives round-trip without semantic loss, including decision, policy/evaluator identity, state digests, and fixture digest.
+- Tests cover direct execution and reachability through the file-task dispatcher.
+- This is stronger than storing a hand-written decision-only record, but remains a synthetic integration check. It does not establish that production decisions are automatically journaled, evaluator code is authentic, or any candidate was executed in an isolated runtime.
+- Previous exact-head CI evidence: run #96, ID `39129086838`, succeeded on SHA `a561d1de02eba99651ccc35140bbe1159b536672`; that run predates SEQ E and does not cover these changes.
+- Next required evidence: CI on the exact SEQ E head, then a separate check of actual retained journal files across independent process invocations.
