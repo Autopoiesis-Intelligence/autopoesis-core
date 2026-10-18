@@ -154,7 +154,31 @@ def execute_selected_task(task: dict[str, Any], queue_path: Path) -> dict[str, A
     }
     if task_type in {"prepare_test_patch", "apply_test_patch_sandbox", "verify_test_patch_sandbox"}:
         bounded_task["source"] = candidate.get("source", "")
-    execution = execute_task(bounded_task, queue_path)
+    try:
+        execution = execute_task(bounded_task, queue_path)
+    except Exception as exc:
+        failure = {
+            "status": "FAIL",
+            "failure_reason": "EXECUTION_ERROR",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+        record_task_result_file(
+            queue_path,
+            task_id,
+            "FAIL",
+            failure,
+            source_sha=os.environ.get("GITHUB_SHA"),
+        )
+        return {
+            "status": "FAIL",
+            "task_id": task_id,
+            "task_type": task_type,
+            "execution_started": True,
+            "lifecycle_status_after_execution": "IN_PROGRESS",
+            "automatic_completion": False,
+            "result": failure,
+        }
+
     record_task_result_file(
         queue_path,
         task_id,
