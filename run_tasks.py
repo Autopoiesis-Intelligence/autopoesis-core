@@ -15,7 +15,7 @@ from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact
 from autopoesis.viability import MetricBound, ViabilityPolicy, evaluate_viability
 from autopoesis.evaluation import EvaluationPolicy, evaluate_transition
 from autopoesis.receipt_store import append_evaluation_receipt, append_record, load_journal
-from autopoesis.execution_policy import CandidateExecutionPolicy, assess_execution_policy, inspect_host_isolation_capabilities, probe_isolation_runtime
+from autopoesis.execution_policy import CandidateExecutionPolicy, assess_execution_policy, inspect_host_isolation_capabilities, probe_isolation_runtime, build_docker_test_command
 
 
 ROOT = Path(__file__).resolve().parent
@@ -241,6 +241,45 @@ def verify_isolation_runtime_probe() -> dict[str, Any]:
     return result
 
 
+
+def verify_docker_command_builder() -> dict[str, Any]:
+    """Verify a fixed, digest-pinned Docker command can be prepared without running it."""
+    policy = CandidateExecutionPolicy(
+        command_profile="python-unittest-v1",
+        timeout_seconds=30,
+        max_output_bytes=100_000,
+        network_disabled=True,
+        secrets_excluded=True,
+        filesystem_isolated=True,
+        os_sandbox_enforced=True,
+    )
+    with tempfile.TemporaryDirectory(prefix="autopoesis-command-plan-") as directory:
+        result = build_docker_test_command(
+            image_digest="sha256:" + "a" * 64,
+            workspace=directory,
+            policy=policy,
+        )
+    argv = result["argv"]
+    required = ("--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges:true")
+    if result["status"] != "COMMAND_PREPARED_NOT_EXECUTED":
+        raise AssertionError("Command builder must not claim execution")
+    if any(flag not in argv for flag in required):
+        raise AssertionError("Docker command is missing a required isolation flag")
+    if result["shell"] is not False or result["candidate_code_executed"] is not False:
+        raise AssertionError("Prepared command must remain inert")
+    if result["execution_authorized"] is not False or result["sandbox_verified"] is not False:
+        raise AssertionError("Command preparation must not grant authority")
+    return {
+        "status": result["status"],
+        "required_flags_present": list(required),
+        "image_digest_pinned": True,
+        "shell": False,
+        "candidate_code_executed": False,
+        "execution_authorized": False,
+        "sandbox_verified": False,
+    }
+
+
 def create_agent_proposal(description: str) -> dict[str, Any]:
     return {
         "status": "PROPOSAL_ONLY",
@@ -328,6 +367,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         result = verify_host_isolation_inventory()
     elif task_type == "verify_isolation_runtime_probe":
         result = verify_isolation_runtime_probe()
+    elif task_type == "verify_docker_command_builder":
+        result = verify_docker_command_builder()
     elif task_type == "proposal":
         description = task.get("description", "")
         if not isinstance(description, str):
