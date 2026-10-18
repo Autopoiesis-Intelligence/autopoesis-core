@@ -102,6 +102,38 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertEqual(reloaded["items"][0]["status"], "SELECTED")
             self.assertEqual(len(reloaded["history"]), 2)
 
+    def test_queue_snapshot_restores_across_clean_directory_and_merge_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original_path = root / "first-run" / "TASK_QUEUE.json"
+            restored_path = root / "clean-run" / "TASK_QUEUE.json"
+            candidate = {
+                "id": "DISC-RESTORE-001",
+                "type": "proposal",
+                "source": "autopoesis/example.py",
+                "evidence": "snapshot restoration acceptance test",
+                "description": "Verify restored queue state.",
+            }
+
+            update_queue_file(original_path, [candidate])
+            record_outcome_file(original_path, candidate["id"], "IN_PROGRESS", "first run")
+            original = load_queue(original_path)
+            original_bytes = original_path.read_bytes()
+
+            restored_path.parent.mkdir(parents=True)
+            restored_path.write_bytes(original_bytes)
+            restored = load_queue(restored_path)
+            self.assertEqual(restored, original)
+
+            merged = update_queue_file(restored_path, [candidate])
+            after_merge = load_queue(restored_path)
+            self.assertEqual(merged["added"], 0)
+            self.assertEqual(after_merge["items"][0]["id"], candidate["id"])
+            self.assertEqual(after_merge["items"][0]["status"], "IN_PROGRESS")
+            self.assertEqual(after_merge["items"][0]["attempts"], 1)
+            self.assertEqual(after_merge["history"], original["history"])
+            self.assertEqual(len(after_merge["items"]), 1)
+
     def test_queue_rejects_duplicate_ids_in_existing_state(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "TASK_QUEUE.json"
