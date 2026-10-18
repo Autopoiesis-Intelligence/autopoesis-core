@@ -27,6 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Reject conflicting seed and restore modes
+        if: ${{ inputs.seed_done_probe && inputs.restore_run_id != '' }}
+        run: |
+          echo "seed_done_probe and restore_run_id are mutually exclusive: seed a source run first, then restore from its numeric run ID in a separate run." >&2
+          exit 1
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
