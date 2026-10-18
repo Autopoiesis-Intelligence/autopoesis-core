@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import platform
 import shutil
+import subprocess
 from typing import Any
 
 
@@ -116,4 +117,69 @@ def inspect_host_isolation_capabilities() -> dict[str, Any]:
             "Verify kernel features, user permissions, filesystem and network restrictions, "
             "credential exclusion, and resource limits with dedicated adversarial tests."
         ),
+    }
+
+
+def probe_isolation_runtime(timeout_seconds: int = 3, output_limit: int = 2048) -> dict[str, Any]:
+    """Run only fixed, read-only runtime capability probes; never execute candidate code."""
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 5:
+        raise ValueError("timeout_seconds must be an integer from 1 to 5")
+    if isinstance(output_limit, bool) or not isinstance(output_limit, int) or not 128 <= output_limit <= 4096:
+        raise ValueError("output_limit must be an integer from 128 to 4096")
+
+    commands = {
+        "docker_daemon": ("docker", "info", "--format", "{{.ServerVersion}}"),
+        "podman_runtime": ("podman", "info", "--format", "{{.Host.Security.Rootless}}"),
+        "user_namespace": ("unshare", "--user", "--map-root-user", "true"),
+    }
+    probes: dict[str, Any] = {}
+    for name, argv in commands.items():
+        executable = shutil.which(argv[0])
+        if executable is None:
+            probes[name] = {"available": False, "reason": "executable_not_found"}
+            continue
+        fixed_argv = (executable, *argv[1:])
+        try:
+            result = subprocess.run(
+                fixed_argv,
+                shell=False,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+            )
+            stdout = result.stdout[:output_limit]
+            stderr = result.stderr[:output_limit]
+            probes[name] = {
+                "available": result.returncode == 0,
+                "returncode": result.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+                "timed_out": False,
+            }
+        except subprocess.TimeoutExpired as exc:
+            probes[name] = {
+                "available": False,
+                "returncode": None,
+                "stdout": (exc.stdout or b"").decode("utf-8", "replace")[:output_limit] if isinstance(exc.stdout, bytes) else str(exc.stdout or "")[:output_limit],
+                "stderr": (exc.stderr or b"").decode("utf-8", "replace")[:output_limit] if isinstance(exc.stderr, bytes) else str(exc.stderr or "")[:output_limit],
+                "timed_out": True,
+            }
+        except OSError as exc:
+            probes[name] = {
+                "available": False,
+                "returncode": None,
+                "stdout": "",
+                "stderr": f"{type(exc).__name__}: {exc}"[:output_limit],
+                "timed_out": False,
+            }
+
+    return {
+        "status": "CAPABILITY_PROBE_ONLY",
+        "probes": probes,
+        "candidate_code_executed": False,
+        "execution_authorized": False,
+        "sandbox_verified": False,
+        "note": "Fixed read-only probes indicate runtime availability only; they do not prove a secure candidate sandbox.",
     }
