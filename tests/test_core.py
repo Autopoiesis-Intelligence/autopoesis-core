@@ -471,5 +471,36 @@ class EvolutionCoreTests(unittest.TestCase):
         self.assertFalse(result["result"]["execution_authorized"])
 
 
+    def test_isolation_runtime_probe_is_diagnostic_only(self):
+        from autopoesis.execution_policy import probe_isolation_runtime
+
+        result = probe_isolation_runtime(timeout_seconds=1, output_limit=256)
+        self.assertEqual(result["status"], "CAPABILITY_PROBE_ONLY")
+        self.assertFalse(result["candidate_code_executed"])
+        self.assertFalse(result["execution_authorized"])
+        self.assertFalse(result["sandbox_verified"])
+        self.assertIn("docker_daemon", result["probes"])
+        self.assertIn("podman_runtime", result["probes"])
+        self.assertIn("user_namespace", result["probes"])
+
+    def test_isolation_runtime_probe_rejects_unbounded_parameters(self):
+        from autopoesis.execution_policy import probe_isolation_runtime
+
+        with self.assertRaises(ValueError):
+            probe_isolation_runtime(timeout_seconds=0)
+        with self.assertRaises(ValueError):
+            probe_isolation_runtime(output_limit=10)
+
+    def test_isolation_runtime_probe_task_is_reachable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = execute_task(
+                {"id": "test-isolation-runtime-probe", "type": "verify_isolation_runtime_probe"},
+                Path(directory) / "TASK_QUEUE.json",
+            )
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["result"]["status"], "CAPABILITY_PROBE_ONLY")
+        self.assertFalse(result["result"]["sandbox_verified"])
+
+
 if __name__ == "__main__":
     unittest.main()
