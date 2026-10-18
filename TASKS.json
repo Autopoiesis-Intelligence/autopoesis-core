@@ -37,6 +37,11 @@
       "id": "CORE-007",
       "type": "verify_viability_gate",
       "description": "Verify explicit viability bounds accept an in-bounds candidate and reject an out-of-bounds candidate without granting fitness, execution, or commit authority."
+    },
+    {
+      "id": "CORE-008",
+      "type": "verify_decision_journal",
+      "description": "Verify local decision journal persistence, hash-chain validation, and tamper detection using temporary synthetic records; this does not authenticate evaluators or prove execution."
     }
   ]
 }
