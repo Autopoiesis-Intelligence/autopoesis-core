@@ -42,7 +42,8 @@ def _validate_history(history: list[Any]) -> None:
             if not isinstance(event.get("note"), str):
                 raise EvolutionError(f"{prefix}: note must be a string")
         if event_type == "VERIFICATION_RECORDED":
-            if event.get("verification_status") not in {"PASS", "FAIL"}:
+            verification_status = event.get("verification_status")
+            if not isinstance(verification_status, str) or verification_status not in {"PASS", "FAIL"}:
                 raise EvolutionError(f"{prefix}: invalid verification status")
             level = event.get("verification_level")
             if not isinstance(level, str) or not level.strip():
@@ -125,8 +126,8 @@ def merge_candidates(queue: dict[str, Any], candidates: list[dict[str, Any]]) ->
 
 def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str = "") -> dict[str, Any]:
     """Record a bounded lifecycle transition without executing the task."""
-    if status not in QUEUE_STATUSES:
-        raise EvolutionError(f"Unsupported queue status: {status}")
+    if not isinstance(status, str) or status not in QUEUE_STATUSES:
+        raise EvolutionError(f"Unsupported queue status: {status!r}")
     updated = json.loads(canonical_json(queue))
     matches = [item for item in updated.get("items", []) if item.get("id") == task_id]
     if len(matches) != 1:
@@ -158,7 +159,7 @@ def record_verification_file(
     """Persist a verification result as evidence without changing task lifecycle status."""
     if not isinstance(task_id, str) or not task_id.strip():
         raise EvolutionError("Verification task_id must be a non-empty string")
-    if verification_status not in {"PASS", "FAIL"}:
+    if not isinstance(verification_status, str) or verification_status not in {"PASS", "FAIL"}:
         raise EvolutionError(f"Unsupported verification status: {verification_status!r}")
     if not isinstance(verification_level, str) or not verification_level.strip():
         raise EvolutionError("Verification level must be a non-empty string")
