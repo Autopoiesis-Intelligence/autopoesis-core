@@ -10,6 +10,7 @@ from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
 from autopoesis.task_queue import record_outcome_file, update_queue_file
+from autopoesis.executor import prepare_patch_artifact
 
 
 ROOT = Path(__file__).resolve().parent
@@ -136,6 +137,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         if not isinstance(target_id, str) or not isinstance(status, str) or not isinstance(note, str):
             raise ValueError("update_task_status requires string task_id, status, and optional note")
         result = record_outcome_file(queue_path, target_id, status, note)
+    elif task_type == "prepare_test_patch":
+        result = prepare_patch_artifact(task, ROOT)
     else:
         raise ValueError(f"Unsupported task type: {task_type!r}")
 
