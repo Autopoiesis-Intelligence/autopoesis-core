@@ -440,10 +440,6 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertEqual(item["status"], "IN_PROGRESS")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_core_011_end_to_end_discovery_selection_verification_and_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -579,3 +575,7 @@ if __name__ == "__main__":
                 with self.subTest(malformed=malformed):
                     with self.assertRaises(EvolutionError):
                         load_queue(path)
+
+
+if __name__ == "__main__":
+    unittest.main()
