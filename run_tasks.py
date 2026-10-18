@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from autopoesis.task_queue import record_outcome_file, record_task_result_file, update_queue_file
+from autopoesis.task_queue import record_outcome_file, record_task_result_file, select_next_task_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, verify_test_patch_in_sandbox
 
 
@@ -132,6 +132,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         result = update_queue_file(queue_path, discovery["candidates"])
         result["discovery_status"] = discovery["status"]
         result["discovered"] = discovery["candidate_count"]
+    elif task_type == "select_next_task":
+        result = select_next_task_file(queue_path)
     elif task_type == "update_task_status":
         target_id = task.get("task_id")
         status = task.get("status")
