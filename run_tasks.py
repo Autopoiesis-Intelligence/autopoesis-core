@@ -13,6 +13,7 @@ from autopoesis.core import EvolutionError, digest_state, evolve
 from autopoesis.task_queue import record_outcome_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact
 from autopoesis.viability import MetricBound, ViabilityPolicy, evaluate_viability
+from autopoesis.receipt_store import append_record, load_journal
 
 
 ROOT = Path(__file__).resolve().parent
@@ -76,6 +77,54 @@ def verify_viability_gate() -> dict[str, Any]:
         "unsafe_candidate_decision": unsafe["decision"],
         "unsafe_violations": unsafe["violations"],
         "authority_boundary": "viability only; no fitness, execution, or commit permission",
+    }
+
+
+
+def verify_decision_journal() -> dict[str, Any]:
+    """Exercise durable local journal round-trip and tamper detection in a temporary directory."""
+    from autopoesis.receipt_store import JournalIntegrityError
+
+    with tempfile.TemporaryDirectory(prefix="autopoesis-journal-check-") as directory:
+        path = Path(directory) / "decisions.json"
+        first = append_record(path, {
+            "receipt_id": "runner-receipt-1",
+            "decision": "ACCEPTED",
+            "parent_state_digest": digest_state({"state": "parent"}),
+            "candidate_state_digest": digest_state({"state": "candidate"}),
+            "evaluator_id": "runner-smoke-evaluator",
+            "evaluator_version": "1",
+            "evidence_scope": "synthetic self-check only",
+        })
+        second = append_record(path, {
+            "receipt_id": "runner-receipt-2",
+            "decision": "REJECTED",
+            "parent_state_digest": first["record"]["candidate_state_digest"],
+            "candidate_state_digest": digest_state({"state": "unsafe"}),
+            "evidence_scope": "synthetic self-check only",
+        })
+        loaded = load_journal(path)
+        if len(loaded["entries"]) != 2 or loaded["entries"][-1]["previous_digest"] != first["entry_digest"]:
+            raise AssertionError("Journal round-trip or hash-chain verification failed")
+
+        tampered = json.loads(path.read_text(encoding="utf-8"))
+        tampered["entries"][0]["record"]["decision"] = "REJECTED"
+        path.write_text(json.dumps(tampered), encoding="utf-8")
+        try:
+            load_journal(path)
+        except JournalIntegrityError:
+            tampering_detected = True
+        else:
+            tampering_detected = False
+        if not tampering_detected:
+            raise AssertionError("Journal failed to detect record tampering")
+
+    return {
+        "status": "CHECKS_PASSED",
+        "records_round_tripped": 2,
+        "hash_chain_verified": True,
+        "tampering_detected": tampering_detected,
+        "authority_boundary": "integrity check only; not tamper-proof, execution proof, or evaluator authentication",
     }
 
 
@@ -156,6 +205,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         result = verify_evolution_cycle()
     elif task_type == "verify_viability_gate":
         result = verify_viability_gate()
+    elif task_type == "verify_decision_journal":
+        result = verify_decision_journal()
     elif task_type == "proposal":
         description = task.get("description", "")
         if not isinstance(description, str):
