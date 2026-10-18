@@ -4,10 +4,13 @@ from .core import EvolutionError, digest_state, evolve
 from .evaluation import EvaluationPolicy, evaluate_transition
 from .viability import MetricBound, ViabilityPolicy, evaluate_viability
 from .receipt_store import JournalIntegrityError, append_evaluation_receipt, append_record, load_journal
+from .execution_policy import CandidateExecutionPolicy, assess_execution_policy
 
 __all__ = [
     "EvolutionError",
     "EvaluationPolicy",
+    "CandidateExecutionPolicy",
+    "assess_execution_policy",
     "MetricBound",
     "JournalIntegrityError",
     "append_evaluation_receipt",
