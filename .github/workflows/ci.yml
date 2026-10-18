@@ -84,7 +84,7 @@ jobs:
           SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml" --jq '.id')"
-          restore_run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs" -f branch="$SOURCE_BRANCH" -F per_page=100 --jq ".workflow_runs[] | select(.id != ($GITHUB_RUN_ID|tonumber)) | select(.workflow_id == ($workflow_id|tonumber)) | select(.head_branch == \"$SOURCE_BRANCH\") | select(.status == \"completed\" and .conclusion == \"success\") | .id" | head -n 1)"
+          restore_run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs" -f branch="$SOURCE_BRANCH" -F per_page=100 | jq -r --arg branch "$SOURCE_BRANCH" --argjson current "$GITHUB_RUN_ID" --argjson workflow "$workflow_id" '.workflow_runs | map(select(.id != $current and .workflow_id == $workflow and .head_branch == $branch and .status == "completed" and .conclusion == "success")) | first | .id // empty')"
           if [[ -z "$restore_run_id" ]]; then
             echo "No prior successful CI run on this branch; cross-run restore smoke test skipped."
             exit 0
