@@ -17,6 +17,11 @@ on:
         required: false
         type: boolean
         default: false
+      omit_queue_snapshot:
+        description: "TEST ONLY: omit TASK_QUEUE.json from this run artifact to verify restore rejection"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -160,6 +165,12 @@ jobs:
                   raise SystemExit("Restored DONE probe has no DONE transition in history")
               print("Synthetic DONE probe and its status history survived cross-run restore.")
           PY
+      - name: Test fixture: omit queue snapshot from artifact
+        if: ${{ inputs.omit_queue_snapshot }}
+        run: |
+          rm -f TASK_QUEUE.json
+          test ! -e TASK_QUEUE.json
+          echo "Test fixture enabled: TASK_QUEUE.json will be absent from the uploaded artifact."
       - name: Upload task results
         if: always()
         uses: actions/upload-artifact@v4
