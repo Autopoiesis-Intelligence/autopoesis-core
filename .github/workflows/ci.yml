@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, feat/ci-restore-task-queue-artifact]
   workflow_dispatch:
     inputs:
       restore_run_id:
