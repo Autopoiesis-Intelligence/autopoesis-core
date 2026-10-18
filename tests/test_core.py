@@ -402,5 +402,53 @@ class EvolutionCoreTests(unittest.TestCase):
 
 
 
+    def test_execution_policy_fails_closed_without_policy_or_required_controls(self):
+        from autopoesis.execution_policy import CandidateExecutionPolicy, assess_execution_policy
+
+        self.assertEqual(assess_execution_policy(None)["status"], "BLOCKED")
+        incomplete = CandidateExecutionPolicy(
+            command_profile="arbitrary-shell",
+            timeout_seconds=0,
+            max_output_bytes=0,
+            network_disabled=False,
+            secrets_excluded=False,
+            filesystem_isolated=False,
+            os_sandbox_enforced=False,
+        )
+        result = assess_execution_policy(incomplete)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertFalse(result["execution_authorized"])
+        self.assertFalse(result["execution_performed"])
+        self.assertGreaterEqual(len(result["missing_requirements"]), 5)
+
+    def test_complete_execution_policy_declaration_still_grants_no_authority(self):
+        from autopoesis.execution_policy import CandidateExecutionPolicy, assess_execution_policy
+
+        policy = CandidateExecutionPolicy(
+            command_profile="python-unittest-v1",
+            timeout_seconds=30,
+            max_output_bytes=100_000,
+            network_disabled=True,
+            secrets_excluded=True,
+            filesystem_isolated=True,
+            os_sandbox_enforced=True,
+        )
+        result = assess_execution_policy(policy)
+        self.assertEqual(result["status"], "POLICY_COMPLETE_NOT_AUTHORIZED")
+        self.assertFalse(result["execution_authorized"])
+        self.assertFalse(result["execution_performed"])
+        self.assertIn("do not prove OS isolation", result["reason"])
+
+    def test_execution_boundary_check_is_reachable_through_task_runner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = execute_task(
+                {"id": "test-execution-boundary", "type": "verify_candidate_execution_boundary"},
+                Path(directory) / "TASK_QUEUE.json",
+            )
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["result"]["status"], "CHECKS_PASSED")
+        self.assertFalse(result["result"]["execution_performed"])
+
+
 if __name__ == "__main__":
     unittest.main()
