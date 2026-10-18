@@ -350,7 +350,7 @@ class EvolutionCoreTests(unittest.TestCase):
             package.mkdir()
             (package / "__init__.py").write_text("", encoding="utf-8")
             source = package / "example.py"
-            source.write_text("VALUE = 42\\n", encoding="utf-8")
+            source.write_text("VALUE = 42\n", encoding="utf-8")
 
             result = verify_test_patch_in_sandbox(
                 {"id": "DISC-VERIFY", "source": "autopoesis/example.py"},
@@ -363,7 +363,7 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertFalse(result["repository_modified"])
             self.assertIn("Ran 1 test", result["stderr"])
             self.assertFalse((root / "tests" / "test_example.py").exists())
-            self.assertEqual(source.read_text(encoding="utf-8"), "VALUE = 42\\n")
+            self.assertEqual(source.read_text(encoding="utf-8"), "VALUE = 42\n")
 
     def test_sandbox_verification_rejects_symlinked_package_root(self):
         import os
@@ -373,7 +373,7 @@ class EvolutionCoreTests(unittest.TestCase):
             package = root / "real_package"
             package.mkdir()
             (package / "__init__.py").write_text("", encoding="utf-8")
-            (package / "example.py").write_text("VALUE = 1\\n", encoding="utf-8")
+            (package / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
             os.symlink(package, root / "autopoesis", target_is_directory=True)
 
             with self.assertRaisesRegex(ValueError, "symlinked source package"):
@@ -388,7 +388,7 @@ class EvolutionCoreTests(unittest.TestCase):
             package = root / "autopoesis"
             package.mkdir()
             (package / "__init__.py").write_text("", encoding="utf-8")
-            (package / "example.py").write_text("VALUE = 1\\n", encoding="utf-8")
+            (package / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "between 1 and 30 seconds"):
                 verify_test_patch_in_sandbox(
