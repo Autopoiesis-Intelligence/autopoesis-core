@@ -308,7 +308,7 @@ jobs:
               "task_queue_size_bytes": queue_path.stat().st_size,
           }
           Path("QUEUE_SNAPSHOT_MANIFEST.json").write_text(
-              json.dumps(manifest, indent=2, sort_keys=True) + "\\n",
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
           print("Created queue snapshot manifest for this run.")
