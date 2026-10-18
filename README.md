@@ -16,13 +16,15 @@ The core has no user accounts, internal authorization framework, network service
 - A small evolution operation that accepts a meaningful state change and rejects a no-op.
 - Explicit, bounded task types rather than arbitrary shell or Python execution from task data.
 - Machine-readable results written to a file.
+- Static discovery of TODO/FIXME/HACK markers and source modules without conventional tests.
+- A JSON task queue with stable candidate IDs, duplicate suppression, lifecycle statuses, attempt counts, and append-only status history.
 - Standard-library-only tests and CI.
 
 ## CI and result files
 
-Every push to `main` and every pull request runs the tests and task runner on Python 3.12. The workflow uploads the generated `RESULTS.json` as the `autopoesis-core-results` artifact.
+Every push to `main` and every pull request runs the tests and task runner on Python 3.12. The workflow uploads generated `RESULTS.json` and `TASK_QUEUE.json` as the `autopoesis-core-results` artifact.
 
-To inspect a run, open [GitHub Actions](https://github.com/Autopoiesis-Intelligence/autopoesis-core/actions), select the run, and download the artifact from its **Artifacts** section. The generated result file is an artifact, not a committed repository file; this keeps execution output separate from source history.
+To inspect a run, open [GitHub Actions](https://github.com/Autopoiesis-Intelligence/autopoesis-core/actions), select the run, and download the artifact from its **Artifacts** section. Generated execution files are artifacts, not committed source files; this keeps runtime output separate from source history. When running locally, `TASK_QUEUE.json` remains on disk between runs. Each GitHub Actions run starts from a clean checkout, so its queue artifact is a persisted snapshot for that run and is not automatically loaded into the next run.
 
 ## Important boundary
 
@@ -35,4 +37,4 @@ python run_tasks.py
 python -m unittest discover -s tests -v
 ```
 
-Edit `TASKS.json` to change the task queue. The runner replaces `RESULTS.json` on each run so the file represents the latest run.
+Edit `TASKS.json` to configure work. `queue_discovered_tasks` merges newly discovered candidates into `TASK_QUEUE.json` without duplicating existing IDs or overwriting their statuses. Use `update_task_status` with `task_id`, `status`, and optional `note` to persist a lifecycle change. Supported statuses are `OPEN`, `SELECTED`, `IN_PROGRESS`, `DONE`, and `REJECTED`; moving a task to `IN_PROGRESS` increments its attempt count. The runner replaces `RESULTS.json` on each run so the file represents the latest run. Use `python run_tasks.py --queue path/to/TASK_QUEUE.json` to choose a queue file.
