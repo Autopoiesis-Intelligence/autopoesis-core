@@ -8,7 +8,7 @@ from pathlib import Path
 from autopoesis.core import EvolutionError, digest_state, evolve
 from run_tasks import discover_tasks
 from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, update_queue_file
-from autopoesis.executor import prepare_patch_artifact
+from autopoesis.executor import prepare_patch_artifact, validate_patch_artifact
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -154,6 +154,56 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertFalse((root / "tests" / "test_example.py").exists())
             self.assertEqual(len(result["files"][0]["sha256"]), 64)
             self.assertEqual(len(result["artifact_sha256"]), 64)
+
+    def test_generated_patch_artifact_is_validated_without_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "autopoesis" / "example.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("VALUE = 1\\n", encoding="utf-8")
+            artifact = prepare_patch_artifact(
+                {"id": "DISC-VALIDATE", "source": "autopoesis/example.py"},
+                root,
+            )
+            self.assertEqual(artifact["validation"]["status"], "VALID")
+            self.assertFalse(artifact["validation"]["execution_performed"])
+            self.assertEqual(artifact["validation"]["files_checked"], 1)
+            self.assertEqual(validate_patch_artifact(artifact)["status"], "VALID")
+
+    def test_patch_artifact_detects_content_tampering(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "autopoesis" / "example.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("VALUE = 1\\n", encoding="utf-8")
+            artifact = prepare_patch_artifact(
+                {"id": "DISC-TAMPER", "source": "autopoesis/example.py"},
+                root,
+            )
+            artifact["files"][0]["content"] += "# changed\\n"
+            with self.assertRaises(ValueError):
+                validate_patch_artifact(artifact)
+
+    def test_patch_artifact_rejects_disallowed_output_path(self):
+        import hashlib
+        from autopoesis.core import canonical_json
+
+        artifact = {
+            "status": "PATCH_PREPARED",
+            "writer_id": "test-writer",
+            "task_id": "DISC-PATH",
+            "files": [{
+                "path": "autopoesis/unsafe.py",
+                "content": "VALUE = 1\\n",
+                "sha256": hashlib.sha256(b"VALUE = 1\\n").hexdigest(),
+            }],
+            "rationale": "test",
+        }
+        artifact["artifact_sha256"] = hashlib.sha256(
+            canonical_json(artifact).encode("utf-8")
+        ).hexdigest()
+        with self.assertRaises(ValueError):
+            validate_patch_artifact(artifact)
 
     def test_bounded_writer_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as directory:
