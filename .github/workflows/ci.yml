@@ -202,7 +202,7 @@ jobs:
                       )
               print("Synthetic verification evidence and digest survived cross-run restore.")
           else:
-              if ${{ inputs.require_restore_probes }}:
+              if os.environ.get("REQUIRE_RESTORE_PROBES", "false").lower() == "true":
                   raise SystemExit("Required synthetic verification evidence is missing from restored snapshot")
               print("No synthetic verification evidence in source snapshot; evidence restore check not exercised.")
           PY
