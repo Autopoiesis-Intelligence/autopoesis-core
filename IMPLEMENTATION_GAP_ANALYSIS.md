@@ -217,3 +217,13 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - Important limit: a constructed argv is not a sandbox proof. The image digest has not yet been selected or approved, the image is not cached in the observed CI runner, and no Docker container has been started by this feature.
 - Before any execution is enabled, a separate runtime adapter must enforce wall-clock timeout and stdout/stderr limits, verify the daemon/image, launch only the prepared fixed command, kill and clean up on timeout, and persist a receipt. Adversarial tests must verify network denial, read-only filesystem, no secrets, resource limits, and cleanup.
 - Evidence before exact-head CI: DESIGN = defined; IMPLEMENTED = added; REACHABLE = task dispatcher + `CORE-013`; RUNTIME = command preparation only, container execution not performed; PERSISTED = test output will be in CI artifact; AUDITED = source-level review; CI_PROVEN = pending.
+
+
+### SEQ K: exact-head CI and task artifact verified
+
+- CI run #143, ID `39130197761`, completed SUCCESS on exact HEAD `a7e354bfe99a605baa93322f2db656af326f3625`. Unit tests, file-based tasks, and artifact upload succeeded.
+- Downloaded artifact `autopoesis-core-results`, ID `12138200190`, and inspected `RESULTS.json`.
+- `CORE-013` returned `COMMAND_PREPARED_NOT_EXECUTED`; it confirmed the fixed isolation flags and digest-shaped image reference, without invoking Docker or candidate code.
+- The current artifact revises the earlier host picture: Docker daemon is reachable; the expected Python image is absent; Podman reports `rootless=true`; `unshare` directly fails with `Operation not permitted`. This does not prove Podman's isolation configuration is sufficient, but it makes rootless Podman a candidate worth comparing against Docker before choosing an adapter.
+- CI PASS proves the command builder and its tests ran successfully; it does not prove that a container has been started or that any isolation control works against hostile code.
+- Next sequence: add a read-only Podman image-readiness probe, compare exact engine constraints, and select one runtime only after the image is pinned and the relevant controls can be tested. Candidate execution remains disabled.
