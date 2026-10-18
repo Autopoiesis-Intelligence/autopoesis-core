@@ -129,6 +129,7 @@ def probe_isolation_runtime(timeout_seconds: int = 3, output_limit: int = 2048) 
 
     commands = {
         "docker_daemon": ("docker", "info", "--format", "{{.ServerVersion}}"),
+        "python_image_cached": ("docker", "image", "inspect", "python:3.12-slim", "--format", "{{.Id}}"),
         "podman_runtime": ("podman", "info", "--format", "{{.Host.Security.Rootless}}"),
         "user_namespace": ("unshare", "--user", "--map-root-user", "true"),
     }
