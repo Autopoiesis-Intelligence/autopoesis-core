@@ -30,10 +30,18 @@ def load_queue(path: Path) -> dict[str, Any]:
         queue = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise EvolutionError(f"Cannot read task queue: {exc}") from exc
-    if not isinstance(queue, dict) or queue.get("version") != QUEUE_VERSION:
+    if (
+        not isinstance(queue, dict)
+        or isinstance(queue.get("version"), bool)
+        or not isinstance(queue.get("version"), int)
+        or queue.get("version") != QUEUE_VERSION
+    ):
         raise EvolutionError("Unsupported task queue format")
     if not isinstance(queue.get("items"), list) or not isinstance(queue.get("history"), list):
         raise EvolutionError("Task queue must contain items and history arrays")
+    for event in queue["history"]:
+        if not isinstance(event, dict) or not isinstance(event.get("event"), str) or not event["event"].strip():
+            raise EvolutionError("Every history entry needs a non-empty event name")
     seen: set[str] = set()
     for item in queue["items"]:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str):
