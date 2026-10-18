@@ -68,3 +68,19 @@ The runner labels a task `PASS` when its implemented handler returns without rai
 ## Current conclusion
 
 The repository contains a useful deterministic starter, task intake, queue, and narrowly scoped patch-artifact mechanism. The inspected source does **not** yet establish a self-evolving core with homeostasis, fitness-based selection, executed sandbox evaluation, automatic accepted-state commit, or full cross-run lineage. These are implementation gaps, not reasons to discard the starter.
+
+
+## Follow-up: evaluator hardening prototype (2026-10-18)
+
+The evaluation prototype has since been extended on the research branch. This section records implementation changes, not a claim of passing CI.
+
+- Missing invariant lists now return `UNRESOLVED / INVARIANTS_MISSING` instead of passing vacuously.
+- Homeostasis receives both parent and candidate states, allowing transition-aware checks.
+- Evaluator, invariant, and homeostasis callbacks receive defensive copies of state/fixtures so ordinary in-place mutation does not alter caller-owned objects.
+- State payloads have configurable maximum canonical JSON byte size and nesting depth.
+- Tests were added for empty invariants, transition-aware homeostasis, callback mutation isolation, state size/depth bounds, and the improvement threshold boundary.
+- The decision receipt remains an in-memory object; durable receipt persistence is still not implemented.
+- Callback copying does not prove purity, determinism, resource isolation, or that the callable actually matches the declared evaluator ID/version. Those remain explicit trust/evidence gaps.
+- The latest observed CI run was run #79, associated with an earlier commit (`ebf00fcb08863cfa4b95bf9ef76ec159066e86bb`): **FAIL**, 34 tests, 2 failures. The failures were the callback-mutation test expectation and the depth-bound test. Follow-up commits `5c8c4bccd856eeec1961d3e64798bf9be51fed4c` and `9d06d09151b23f9a464134df8372ede080b6a678` addressed those two cases, but no CI run has yet been observed for the newer head. Do not infer that the fixes pass until CI reruns.
+
+Next evidence requirement: obtain a CI run for the exact current branch head, inspect its result, and then run an end-to-end runtime demonstration separately. A passing unit suite alone would not establish durable receipts, isolated execution, or a complete self-evolution loop.
