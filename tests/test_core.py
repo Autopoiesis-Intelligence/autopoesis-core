@@ -442,3 +442,58 @@ class EvolutionCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_core_011_end_to_end_discovery_selection_verification_and_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "autopoesis").mkdir()
+            (root / "tests").mkdir()
+            source = root / "autopoesis" / "candidate.py"
+            source.write_text("VALUE = 7\\n", encoding="utf-8")
+            queue_path = root / "TASK_QUEUE.json"
+
+            discovery = discover_tasks(root)
+            self.assertEqual(discovery["status"], "CANDIDATES_FOUND")
+            self.assertEqual(discovery["candidate_count"], 1)
+            candidate = discovery["candidates"][0]
+            self.assertEqual(candidate["type"], "prepare_test_patch")
+            self.assertEqual(candidate["source"], "autopoesis/candidate.py")
+
+            merged = update_queue_file(queue_path, discovery["candidates"])
+            self.assertEqual(merged["added"], 1)
+            selection = select_next_task_file(queue_path)
+            self.assertEqual(selection["status"], "TASK_SELECTED")
+            self.assertEqual(selection["task_id"], candidate["id"])
+            self.assertFalse(selection["execution_started"])
+
+            artifact = prepare_patch_artifact(candidate, root)
+            self.assertEqual(validate_patch_artifact(artifact)["status"], "VALID")
+            self.assertEqual(artifact["files"][0]["path"], "tests/test_candidate.py")
+            verification = verify_test_patch_in_sandbox(candidate, root, timeout_seconds=10)
+            self.assertEqual(
+                verification["verification_status"],
+                "PASS",
+                verification.get("stdout", "") + verification.get("stderr", ""),
+            )
+            self.assertEqual(verification["return_code"], 0)
+            self.assertFalse(verification["repository_modified"])
+            self.assertFalse((root / "tests" / "test_candidate.py").exists())
+            self.assertEqual(source.read_text(encoding="utf-8"), "VALUE = 7\\n")
+
+            record_task_result_file(
+                queue_path,
+                candidate["id"],
+                "PASS",
+                {"verification_status": verification["verification_status"],
+                 "return_code": verification["return_code"],
+                 "artifact_sha256": artifact["artifact_sha256"]},
+                run_at="2026-10-18T00:00:00+00:00",
+                source_sha="b" * 40,
+            )
+            persisted = load_queue(queue_path)
+            item = next(item for item in persisted["items"] if item["id"] == candidate["id"])
+            self.assertEqual(item["status"], "SELECTED")
+            self.assertEqual(persisted["history"][-1]["event"], "TASK_RESULT_RECORDED")
+            self.assertEqual(persisted["history"][-1]["result_status"], "PASS")
+            self.assertEqual(len(persisted["history"][-1]["evidence_sha256"]), 64)
