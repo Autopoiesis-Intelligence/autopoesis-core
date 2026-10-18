@@ -1,4 +1,4 @@
-"""Run a bounded set of tasks from JSON files."""
+"""Run bounded tasks and inspect the repository for development opportunities."""
 
 from __future__ import annotations
 
@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
+
+
+ROOT = Path(__file__).resolve().parent
+IGNORED_PARTS = {".git", "__pycache__", ".venv", "venv"}
 
 
 def verify_evolution_cycle() -> dict[str, Any]:
@@ -53,6 +57,56 @@ def create_agent_proposal(description: str) -> dict[str, Any]:
     }
 
 
+def discover_tasks(repository_root: Path) -> dict[str, Any]:
+    """Find evidence-backed, low-risk follow-up tasks without modifying files."""
+    candidates: list[dict[str, str]] = []
+    python_files = sorted(
+        path for path in repository_root.rglob("*.py")
+        if not any(part in IGNORED_PARTS for part in path.parts)
+    )
+
+    for path in python_files:
+        relative = path.relative_to(repository_root).as_posix()
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+
+        if relative.startswith(("autopoesis/", "run_tasks.py")):
+            for line_number, line in enumerate(source.splitlines(), start=1):
+                marker = next((item for item in ("TODO", "FIXME", "HACK") if item in line), None)
+                if marker:
+                    candidate = {
+                        "type": "proposal",
+                        "source": relative,
+                        "evidence": f"{marker} marker on line {line_number}",
+                        "description": f"Review and resolve the {marker} marker in {relative}:{line_number}.",
+                    }
+                    candidate["id"] = "DISC-" + digest_state(candidate)[:12]
+                    candidates.append(candidate)
+
+        if relative.startswith("autopoesis/") and path.name != "__init__.py":
+            expected_test = repository_root / "tests" / f"test_{path.stem}.py"
+            if not expected_test.exists():
+                candidate = {
+                    "type": "proposal",
+                    "source": relative,
+                    "evidence": f"no conventional test file found at tests/test_{path.stem}.py",
+                    "description": f"Add focused tests for {relative}.",
+                }
+                candidate["id"] = "DISC-" + digest_state(candidate)[:12]
+                candidates.append(candidate)
+
+    unique = {item["id"]: item for item in candidates}
+    ordered = [unique[key] for key in sorted(unique)]
+    return {
+        "status": "CANDIDATES_FOUND" if ordered else "NO_CANDIDATES",
+        "candidate_count": len(ordered),
+        "candidates": ordered,
+        "scope": "static Python source inspection only; no code execution or modification",
+    }
+
+
 def execute_task(task: dict[str, Any]) -> dict[str, Any]:
     task_id = task.get("id")
     task_type = task.get("type")
@@ -67,6 +121,8 @@ def execute_task(task: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(description, str):
             raise ValueError("Task description must be a string")
         result = create_agent_proposal(description)
+    elif task_type == "discover_tasks":
+        result = discover_tasks(ROOT)
     else:
         raise ValueError(f"Unsupported task type: {task_type!r}")
 
