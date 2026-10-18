@@ -1,0 +1,57 @@
+name: Copilot CLI smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  copilot-requests: write
+
+concurrency:
+  group: copilot-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  authentication-smoke-test:
+    name: Verify Copilot request without repository writes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require repository secret
+        shell: bash
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          if [[ -z "${COPILOT_GITHUB_TOKEN}" ]]; then
+            echo "::error::Missing repository secret COPILOT_GITHUB_TOKEN. Add it in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "Required secret is present (value not displayed)."
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Copilot CLI
+        run: npm install --global @github/copilot
+
+      - name: Make one bounded, read-only AI request
+        shell: bash
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          set +e
+          response="$(timeout 180s copilot -p "Respond with exactly this text and nothing else: AUTOPOIESIS_COPILOT_SMOKE_OK. Do not use tools, access files, or perform actions." -s --no-ask-user 2>/dev/null)"
+          cli_status=$?
+          set -e
+          if [[ "$cli_status" -ne 0 ]]; then
+            echo "::error::Copilot CLI request failed (exit $cli_status). Check token permissions, Copilot entitlement, and available AI quota. Token value was not logged."
+            exit "$cli_status"
+          fi
+          if [[ "$response" != "AUTOPOIESIS_COPILOT_SMOKE_OK." ]]; then
+            echo "::error::Copilot returned an unexpected response; smoke test rejected."
+            exit 1
+          fi
+          echo "COPILOT_AUTHENTICATED_REQUEST_OK"
+          echo "COPILOT_AUTHENTICATED_REQUEST_OK" >> "$GITHUB_STEP_SUMMARY"
