@@ -146,8 +146,8 @@ def append_evaluation_receipt(
     if receipt.get("decision") not in {"ACCEPTED", "REJECTED", "UNRESOLVED"}:
         raise JournalIntegrityError("Evaluation receipt has an invalid decision.")
     record = {
+        **receipt,
         "receipt_id": receipt_id,
         "receipt_type": "evaluation_transition",
-        **receipt,
     }
     return append_record(path, record)
