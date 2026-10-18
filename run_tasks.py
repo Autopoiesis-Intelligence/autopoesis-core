@@ -152,7 +152,33 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
     else:
         raise ValueError(f"Unsupported task type: {task_type!r}")
 
-    return {"id": task_id, "type": task_type, "status": "PASS", "result": result}
+    record: dict[str, Any] = {
+        "id": task_id,
+        "type": task_type,
+        "status": "PASS",
+        "result": result,
+    }
+    if task_type == "prepare_test_patch":
+        record["verification"] = {
+            "level": "PATCH_ARTIFACT_PREPARED_AND_VALIDATED",
+            "generated_code_executed": False,
+            "tests_executed": False,
+            "meaning": "PASS confirms artifact preparation and static validation only.",
+        }
+    elif task_type == "apply_test_patch_sandbox":
+        record["verification"] = {
+            "level": "PATCH_APPLIED_TO_DISPOSABLE_SANDBOX",
+            "generated_code_executed": False,
+            "tests_executed": False,
+            "repository_modified": False,
+            "meaning": "PASS confirms sandbox application only; generated tests were not run.",
+        }
+    else:
+        record["verification"] = {
+            "level": "TASK_HANDLER_COMPLETED",
+            "meaning": "PASS confirms the task handler returned without an exception; interpret result details for the actual checks performed.",
+        }
+    return record
 
 
 def run(tasks_path: Path, results_path: Path, queue_path: Path = Path("TASK_QUEUE.json")) -> int:
