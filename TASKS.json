@@ -20,6 +20,12 @@
       "id": "CORE-004",
       "type": "queue_discovered_tasks",
       "description": "Discover repository improvement candidates and merge them into the persistent TASK_QUEUE.json without duplicating existing candidates or overwriting their statuses."
+    },
+    {
+      "id": "CORE-005",
+      "type": "prepare_test_patch",
+      "source": "autopoesis/task_queue.py",
+      "description": "Generate a reviewable import-smoke-test patch for the task queue module; do not apply or execute the patch."
     }
   ]
 }
