@@ -276,6 +276,29 @@ class EvolutionCoreTests(unittest.TestCase):
                 apply_patch_to_sandbox(artifact, sandbox)
             self.assertEqual(target.read_text(encoding="utf-8"), "KEEP = True\\n")
 
+    def test_patch_application_rejects_symlinked_tests_directory(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            source = repository / "autopoesis" / "example.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("VALUE = 1\\n", encoding="utf-8")
+            artifact = prepare_patch_artifact(
+                {"id": "DISC-SYMLINK", "source": "autopoesis/example.py"},
+                repository,
+            )
+            sandbox = root / "sandbox"
+            sandbox.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            os.symlink(outside, sandbox / "tests", target_is_directory=True)
+
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                apply_patch_to_sandbox(artifact, sandbox)
+            self.assertFalse((outside / "test_example.py").exists())
+
     def test_bounded_writer_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
