@@ -497,3 +497,50 @@ if __name__ == "__main__":
             self.assertEqual(persisted["history"][-1]["event"], "TASK_RESULT_RECORDED")
             self.assertEqual(persisted["history"][-1]["result_status"], "PASS")
             self.assertEqual(len(persisted["history"][-1]["evidence_sha256"]), 64)
+
+
+    def test_core_012_queue_state_survives_process_restart_and_atomic_writes_leave_no_temp_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            queue_path = root / "state" / "TASK_QUEUE.json"
+            update_queue_file(queue_path, [{
+                "id": "CORE-012-PERSIST",
+                "type": "proposal",
+                "source": "autopoesis/example.py",
+                "evidence": "process restart persistence",
+                "description": "Confirm state is reloaded from disk by a fresh process.",
+            }])
+            record_outcome_file(queue_path, "CORE-012-PERSIST", "SELECTED", "persist selection")
+            record_task_result_file(
+                queue_path,
+                "CORE-012-PERSIST",
+                "PASS",
+                {"verification_status": "PASS", "return_code": 0},
+                run_at="2026-10-18T00:00:00+00:00",
+                source_sha="c" * 40,
+            )
+
+            code = (
+                "import json, sys; from pathlib import Path; "
+                "from autopoesis.task_queue import load_queue; "
+                "q = load_queue(Path(sys.argv[1])); "
+                "i = next(x for x in q['items'] if x['id'] == 'CORE-012-PERSIST'); "
+                "print(json.dumps({'status': i['status'], 'history': [e['event'] for e in q['history']], "
+                "'result': q['history'][-1]['result_status'], 'sha': q['history'][-1]['source_sha']}))"
+            )
+            completed = subprocess.run(
+                [sys.executable, "-c", code, str(queue_path)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            restored = json.loads(completed.stdout)
+            self.assertEqual(restored["status"], "SELECTED")
+            self.assertIn("CANDIDATE_ADDED", restored["history"])
+            self.assertIn("STATUS_CHANGED", restored["history"])
+            self.assertEqual(restored["history"][-1], "TASK_RESULT_RECORDED")
+            self.assertEqual(restored["result"], "PASS")
+            self.assertEqual(restored["sha"], "c" * 40)
+            self.assertEqual(list(queue_path.parent.glob(".TASK_QUEUE.json.*.tmp")), [])
