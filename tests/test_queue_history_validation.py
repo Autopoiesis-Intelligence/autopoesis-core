@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from autopoesis.core import EvolutionError
-from autopoesis.task_queue import load_queue, update_queue_file, record_outcome_file
+from autopoesis.task_queue import load_queue, update_queue_file, record_outcome_file, record_verification_file
 
 
 class QueueHistoryValidationTests(unittest.TestCase):
@@ -82,6 +82,40 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "from": "OPEN",
                 "to": "DONE",
                 "note": ["not-a-string"],
+                "at": "2026-01-01T00:00:00+00:00",
+            }]))
+
+    def test_accepts_persisted_verification_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{
+                "id": "TASK-1",
+                "type": "proposal",
+                "description": "test",
+            }])
+            record_verification_file(
+                path,
+                "CORE-007",
+                "PASS",
+                "GENERATED_TEST_EXECUTION",
+                "a" * 64,
+            )
+            queue = load_queue(path)
+            event = queue["history"][-1]
+            self.assertEqual(event["event"], "VERIFICATION_RECORDED")
+            self.assertEqual(event["verification_status"], "PASS")
+            self.assertEqual(event["verification_level"], "GENERATED_TEST_EXECUTION")
+            self.assertEqual(event["artifact_sha256"], "a" * 64)
+            self.assertEqual(queue["items"][0]["status"], "OPEN")
+
+    def test_rejects_invalid_persisted_verification_digest(self):
+        with self.assertRaisesRegex(EvolutionError, "artifact_sha256"):
+            load_queue(self._write_queue([{
+                "event": "VERIFICATION_RECORDED",
+                "task_id": "CORE-007",
+                "verification_status": "PASS",
+                "verification_level": "GENERATED_TEST_EXECUTION",
+                "artifact_sha256": "not-a-digest",
                 "at": "2026-01-01T00:00:00+00:00",
             }]))
 
