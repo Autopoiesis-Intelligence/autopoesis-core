@@ -7,7 +7,7 @@ from pathlib import Path
 
 from autopoesis.core import EvolutionError, digest_state, evolve
 from run_tasks import discover_tasks
-from autopoesis.task_queue import load_queue, merge_candidates, record_outcome, update_queue_file
+from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, update_queue_file
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -114,6 +114,25 @@ class EvolutionCoreTests(unittest.TestCase):
             }), encoding="utf-8")
             with self.assertRaises(ValueError):
                 load_queue(path)
+
+
+    def test_queue_status_transition_is_persisted_with_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            candidate = {
+                "id": "DISC-456",
+                "type": "proposal",
+                "source": "autopoesis/example.py",
+                "evidence": "missing focused test",
+                "description": "Add focused tests.",
+            }
+            update_queue_file(path, [candidate])
+            outcome = record_outcome_file(path, "DISC-456", "IN_PROGRESS", "begin bounded work")
+            self.assertEqual(outcome["status"], "IN_PROGRESS")
+            queue = load_queue(path)
+            self.assertEqual(queue["items"][0]["attempts"], 1)
+            self.assertEqual(queue["history"][-1]["event"], "STATUS_CHANGED")
+            self.assertEqual(queue["history"][-1]["to"], "IN_PROGRESS")
 
 
 if __name__ == "__main__":
