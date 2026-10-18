@@ -92,7 +92,6 @@ def merge_candidates(queue: dict[str, Any], candidates: list[dict[str, Any]]) ->
         })
         added += 1
     merged["items"].sort(key=lambda item: item["id"])
-    merged["history"].sort(key=lambda item: (item.get("at", ""), item.get("task_id", ""), item.get("event", "")))
     return {"queue": merged, "added": added, "total": len(merged["items"])}
 
 
