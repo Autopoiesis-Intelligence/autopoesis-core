@@ -415,5 +415,30 @@ class EvolutionCoreTests(unittest.TestCase):
                 execute_selected_task({"type": "execute_selected_task"}, path)
 
 
+    def test_selected_executor_prepares_real_patch_artifact_without_applying_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            source = "autopoesis/task_queue.py"
+            expected_test = ROOT / "tests" / "test_task_queue.py"
+            existed_before = expected_test.exists()
+            update_queue_file(path, [{
+                "id": "DISC-PATCH",
+                "type": "prepare_test_patch",
+                "source": source,
+                "evidence": "missing conventional test file",
+                "description": "Prepare a test patch.",
+            }])
+            record_outcome_file(path, "DISC-PATCH", "SELECTED", "selected for bounded patch preparation")
+            result = execute_selected_task({"type": "execute_selected_task"}, path)
+            self.assertEqual(result["status"], "PASS")
+            self.assertEqual(result["task_type"], "prepare_test_patch")
+            artifact = result["result"]
+            self.assertEqual(artifact["status"], "PATCH_PREPARED")
+            self.assertEqual(artifact["files"][0]["path"], "tests/test_task_queue.py")
+            self.assertEqual(expected_test.exists(), existed_before)
+            item = load_queue(path)["items"][0]
+            self.assertEqual(item["status"], "IN_PROGRESS")
+
+
 if __name__ == "__main__":
     unittest.main()
