@@ -358,5 +358,18 @@ class EvolutionCoreTests(unittest.TestCase):
 
 
 
+    def test_typed_evaluation_receipt_rejects_incomplete_receipts(self):
+        from autopoesis.receipt_store import JournalIntegrityError, append_evaluation_receipt
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(JournalIntegrityError):
+                append_evaluation_receipt(
+                    Path(directory) / "decisions.json",
+                    {"decision": "ACCEPTED"},
+                    receipt_id="incomplete",
+                )
+
+
+
 if __name__ == "__main__":
     unittest.main()
