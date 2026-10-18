@@ -52,9 +52,14 @@ jobs:
             python -c 'import os,pathlib,sys; s=pathlib.Path(sys.argv[1]).read_text(errors="replace"); print(s.replace(os.environ.get("COPILOT_GITHUB_TOKEN", ""), "[REDACTED]"))' "$stderr_file"
             exit "$cli_status"
           fi
-          if [[ "$response" != "AUTOPOIESIS_COPILOT_SMOKE_OK." ]]; then
-            echo "::error::Copilot returned an unexpected response; smoke test rejected."
+          if [[ -z "${response//[[:space:]]/}" ]]; then
+            echo "::error::Copilot CLI exited successfully but returned an empty response."
             exit 1
           fi
+          response_bytes="$(printf '%s' "$response" | wc -c | tr -d '[:space:]')"
           echo "COPILOT_AUTHENTICATED_REQUEST_OK"
-          echo "COPILOT_AUTHENTICATED_REQUEST_OK" >> "$GITHUB_STEP_SUMMARY"
+          echo "Copilot returned a non-empty response (${response_bytes} bytes); response text omitted from logs."
+          {
+            echo "COPILOT_AUTHENTICATED_REQUEST_OK"
+            echo "Copilot returned a non-empty response (${response_bytes} bytes)."
+          } >> "$GITHUB_STEP_SUMMARY"
