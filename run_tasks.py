@@ -221,7 +221,15 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
     else:
         raise ValueError(f"Unsupported task type: {task_type!r}")
 
-    task_status = "FAIL" if result.get("verification_status") == "FAIL" else "PASS"
+    if task_type == "execute_selected_task":
+        # A blocked selected task must not be reported as a successful runner task.
+        task_status = result.get("status", "FAIL")
+        if task_status == "BLOCKED":
+            task_status = "FAIL"
+        if task_status not in {"PASS", "FAIL"}:
+            task_status = "FAIL"
+    else:
+        task_status = "FAIL" if result.get("verification_status") == "FAIL" else "PASS"
     return {"id": task_id, "type": task_type, "status": task_status, "result": result}
 
 
