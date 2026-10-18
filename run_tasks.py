@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from autopoesis.task_queue import record_outcome_file, update_queue_file
+from autopoesis.task_queue import record_outcome_file, record_verification_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, verify_test_patch_in_sandbox
 
 
@@ -153,6 +153,15 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         }
     else:
         raise ValueError(f"Unsupported task type: {task_type!r}")
+
+    if task_type == "verify_test_patch_sandbox" and result.get("verification_status") in {"PASS", "FAIL"}:
+        record_verification_file(
+            queue_path,
+            task_id,
+            result["verification_status"],
+            "GENERATED_TEST_EXECUTION",
+            result.get("artifact_sha256"),
+        )
 
     task_status = "FAIL" if result.get("verification_status") == "FAIL" else "PASS"
     record: dict[str, Any] = {
