@@ -12,6 +12,7 @@ from typing import Any
 from autopoesis.core import EvolutionError, digest_state, evolve
 from autopoesis.task_queue import record_outcome_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact
+from autopoesis.viability import MetricBound, ViabilityPolicy, evaluate_viability
 
 
 ROOT = Path(__file__).resolve().parent
@@ -41,6 +42,40 @@ def verify_evolution_cycle() -> dict[str, Any]:
         "meaningful_transition_accepted": transition["accepted"],
         "noop_rejected": noop_rejected,
         "state_digest": transition["state_digest"],
+    }
+
+
+
+
+def verify_viability_gate() -> dict[str, Any]:
+    """Exercise a bounded viability decision; this is not fitness or commit authority."""
+    policy = ViabilityPolicy(
+        policy_id="runner-smoke-envelope",
+        policy_version="1",
+        metrics=(
+            MetricBound("errors", "validation-errors", "1", "count", minimum=0, maximum=2),
+            MetricBound("memory_mb", "memory-footprint", "1", "MB", maximum=256),
+        ),
+    )
+
+    def measure(state: dict[str, Any], metric: MetricBound) -> float:
+        return float(state[metric.name])
+
+    parent = {"errors": 3, "memory_mb": 128}
+    viable_candidate = {"errors": 1, "memory_mb": 160}
+    unsafe_candidate = {"errors": 1, "memory_mb": 300}
+    viable = evaluate_viability(parent, viable_candidate, policy=policy, measure=measure)
+    unsafe = evaluate_viability(parent, unsafe_candidate, policy=policy, measure=measure)
+    if viable["decision"] != "ACCEPTED":
+        raise AssertionError(f"Viable candidate was not accepted by viability gate: {viable}")
+    if unsafe["decision"] != "REJECTED":
+        raise AssertionError(f"Out-of-bounds candidate was not rejected: {unsafe}")
+    return {
+        "status": "CHECKS_PASSED",
+        "viable_candidate_decision": viable["decision"],
+        "unsafe_candidate_decision": unsafe["decision"],
+        "unsafe_violations": unsafe["violations"],
+        "authority_boundary": "viability only; no fitness, execution, or commit permission",
     }
 
 
@@ -119,6 +154,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
 
     if task_type == "verify_evolution_cycle":
         result = verify_evolution_cycle()
+    elif task_type == "verify_viability_gate":
+        result = verify_viability_gate()
     elif task_type == "proposal":
         description = task.get("description", "")
         if not isinstance(description, str):
