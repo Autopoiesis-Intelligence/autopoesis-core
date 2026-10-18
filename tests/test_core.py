@@ -325,5 +325,18 @@ class EvolutionCoreTests(unittest.TestCase):
 
 
 
+    def test_decision_journal_is_reachable_through_task_runner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            queue_path = Path(directory) / "TASK_QUEUE.json"
+            result = execute_task(
+                {"id": "test-journal", "type": "verify_decision_journal"},
+                queue_path,
+            )
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["result"]["status"], "CHECKS_PASSED")
+        self.assertTrue(result["result"]["tampering_detected"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
