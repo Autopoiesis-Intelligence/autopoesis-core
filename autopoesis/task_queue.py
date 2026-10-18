@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -125,3 +127,48 @@ def record_outcome_file(path: Path, task_id: str, status: str, note: str = "") -
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {"task_id": task_id, "status": status, "path": path.as_posix()}
+
+
+def record_task_result_file(
+    path: Path,
+    task_id: str,
+    status: str,
+    result: dict[str, Any] | None = None,
+    run_at: str | None = None,
+    source_sha: str | None = None,
+) -> dict[str, Any]:
+    """Append a compact execution-evidence event without changing lifecycle status."""
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise EvolutionError("Task result needs a non-empty task id")
+    if status not in {"PASS", "FAIL"}:
+        raise EvolutionError(f"Unsupported execution result status: {status}")
+    payload = result if isinstance(result, dict) else {}
+    try:
+        evidence_json = canonical_json({"task_id": task_id, "status": status, "result": payload})
+    except (TypeError, ValueError) as exc:
+        raise EvolutionError(f"Execution result is not canonical JSON: {exc}") from exc
+    evidence_sha256 = hashlib.sha256(evidence_json.encode("utf-8")).hexdigest()
+    if source_sha is not None and not re.fullmatch(r"[0-9a-fA-F]{40,64}", source_sha):
+        source_sha = None
+    timestamp = run_at or datetime.now(timezone.utc).isoformat()
+    event = {
+        "event": "TASK_RESULT_RECORDED",
+        "task_id": task_id,
+        "result_status": status,
+        "evidence_sha256": evidence_sha256,
+        "source_sha": source_sha,
+        "failure_reason": payload.get("failure_reason") if isinstance(payload.get("failure_reason"), str) else None,
+        "return_code": payload.get("return_code") if isinstance(payload.get("return_code"), int) else None,
+        "at": timestamp,
+    }
+    queue = load_queue(path)
+    queue.setdefault("history", []).append(event)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(queue, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    return {
+        "task_id": task_id,
+        "result_status": status,
+        "evidence_sha256": evidence_sha256,
+        "source_sha": source_sha,
+        "path": path.as_posix(),
+    }
