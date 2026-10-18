@@ -17,11 +17,6 @@ on:
         required: false
         type: boolean
         default: false
-      require_restore_probes:
-        description: "Fail restore verification unless both synthetic probes exist and match expected values"
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   actions: read
@@ -151,7 +146,7 @@ jobs:
       - name: Verify restored DONE probe when present
         if: ${{ inputs.restore_run_id != '' }}
         env:
-          REQUIRE_RESTORE_PROBES: ${{ inputs.require_restore_probes }}
+          REQUIRE_RESTORE_PROBES: "true"
         run: |
           python - <<'PY'
           import os
