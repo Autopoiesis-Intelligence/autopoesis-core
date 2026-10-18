@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "CORE-001",
+      "type": "verify_evolution_cycle",
+      "description": "Verify deterministic digest, meaningful evolution, and no-op rejection."
+    },
+    {
+      "id": "CORE-002",
+      "type": "proposal",
+      "description": "Specify the smallest replaceable interface for a future code-writing agent. Do not implement network access or credentials."
+    }
+  ]
+}
