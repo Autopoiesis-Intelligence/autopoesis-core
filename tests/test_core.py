@@ -450,5 +450,26 @@ class EvolutionCoreTests(unittest.TestCase):
         self.assertFalse(result["result"]["execution_performed"])
 
 
+    def test_host_isolation_inventory_never_claims_verified_sandbox(self):
+        from autopoesis.execution_policy import inspect_host_isolation_capabilities
+
+        result = inspect_host_isolation_capabilities()
+        self.assertEqual(result["status"], "NO_VERIFIED_SANDBOX")
+        self.assertFalse(result["tool_presence_is_proof"])
+        self.assertFalse(result["execution_authorized"])
+        self.assertFalse(result["execution_performed"])
+        self.assertIsInstance(result["discovered_tools"], dict)
+
+    def test_host_isolation_inventory_task_is_reachable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = execute_task(
+                {"id": "test-host-isolation-inventory", "type": "verify_host_isolation_inventory"},
+                Path(directory) / "TASK_QUEUE.json",
+            )
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["result"]["status"], "NO_VERIFIED_SANDBOX")
+        self.assertFalse(result["result"]["execution_authorized"])
+
+
 if __name__ == "__main__":
     unittest.main()
