@@ -8,6 +8,7 @@ from pathlib import Path
 from autopoesis.core import EvolutionError, digest_state, evolve
 from run_tasks import discover_tasks
 from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, update_queue_file
+from autopoesis.executor import prepare_patch_artifact
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,6 +134,38 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertEqual(queue["items"][0]["attempts"], 1)
             self.assertEqual(queue["history"][-1]["event"], "STATUS_CHANGED")
             self.assertEqual(queue["history"][-1]["to"], "IN_PROGRESS")
+
+
+    def test_bounded_writer_prepares_reviewable_patch_without_mutating_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "autopoesis" / "example.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("VALUE = 1\\n", encoding="utf-8")
+            result = prepare_patch_artifact(
+                {"id": "DISC-EXAMPLE", "source": "autopoesis/example.py"},
+                root,
+            )
+            self.assertEqual(result["status"], "PATCH_PREPARED")
+            self.assertEqual(result["writer_id"], "bounded-test-scaffold-v1")
+            self.assertEqual(len(result["files"]), 1)
+            self.assertEqual(result["files"][0]["path"], "tests/test_example.py")
+            self.assertEqual(source.read_text(encoding="utf-8"), "VALUE = 1\\n")
+            self.assertFalse((root / "tests" / "test_example.py").exists())
+            self.assertEqual(len(result["files"][0]["sha256"]), 64)
+            self.assertEqual(len(result["artifact_sha256"]), 64)
+
+    def test_bounded_writer_rejects_path_traversal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "autopoesis" / "example.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("VALUE = 1\\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                prepare_patch_artifact(
+                    {"id": "DISC-EXAMPLE", "source": "../outside.py"},
+                    root,
+                )
 
 
 if __name__ == "__main__":
