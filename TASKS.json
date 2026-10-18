@@ -43,6 +43,11 @@
       "id": "CORE-009",
       "type": "select_next_task",
       "description": "Select one OPEN task deterministically from TASK_QUEUE.json using explicit priority, attempt count, and task ID; persist the selection without executing the selected task."
+    },
+    {
+      "id": "CORE-010",
+      "type": "execute_selected_task",
+      "description": "Execute exactly one SELECTED queue item only if its type is allowlisted; currently proposal-only tasks are supported. Record result, preserve IN_PROGRESS for review, and never auto-complete the task."
     }
   ]
 }
