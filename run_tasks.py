@@ -13,6 +13,7 @@ from autopoesis.core import EvolutionError, digest_state, evolve
 from autopoesis.task_queue import record_outcome_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact
 from autopoesis.viability import MetricBound, ViabilityPolicy, evaluate_viability
+from autopoesis.evaluation import EvaluationPolicy, evaluate_transition
 from autopoesis.receipt_store import append_record, load_journal
 
 
@@ -128,6 +129,53 @@ def verify_decision_journal() -> dict[str, Any]:
     }
 
 
+
+def verify_evaluation_receipt_persistence() -> dict[str, Any]:
+    """Persist and reload a real evaluation receipt from a synthetic test transition."""
+    policy = EvaluationPolicy(
+        policy_id="journal-integration-smoke",
+        policy_version="1",
+        evaluator_id="counter-evaluator",
+        evaluator_version="1",
+        objective_direction="maximize",
+    )
+    parent = {"score": 1}
+    candidate = {"score": 2}
+    receipt = evaluate_transition(
+        parent,
+        candidate,
+        expected_parent_digest=digest_state(parent),
+        candidate_id="candidate-journal-smoke",
+        policy=policy,
+        evaluator=lambda state, fixtures: state["score"],
+        fixtures={"fixture_set": "synthetic-v1"},
+        invariants=(lambda state: state["score"] >= 0,),
+        homeostasis_check=lambda before, after, fixtures: after["score"] >= before["score"],
+    )
+    if receipt.get("decision") != "ACCEPTED":
+        raise AssertionError(f"Evaluation receipt was not accepted: {receipt}")
+
+    with tempfile.TemporaryDirectory(prefix="autopoesis-evaluation-journal-") as directory:
+        path = Path(directory) / "decisions.json"
+        entry = append_record(path, {"receipt_id": "evaluation-smoke-1", **receipt})
+        restored = load_journal(path)
+        persisted = restored["entries"][0]["record"]
+        if persisted != {"receipt_id": "evaluation-smoke-1", **receipt}:
+            raise AssertionError("Persisted evaluation receipt differs from source receipt")
+        if entry["entry_digest"] != restored["entries"][0]["entry_digest"]:
+            raise AssertionError("Persisted entry digest mismatch")
+
+    return {
+        "status": "CHECKS_PASSED",
+        "decision": receipt["decision"],
+        "policy_id": receipt["evaluation_policy_id"],
+        "evaluator_id": receipt["evaluator_id"],
+        "fixtures_digest_present": "fixtures_digest" in receipt,
+        "persisted_and_reloaded": True,
+        "authority_boundary": "synthetic evaluation evidence only; not production execution or trusted evaluator authentication",
+    }
+
+
 def create_agent_proposal(description: str) -> dict[str, Any]:
     return {
         "status": "PROPOSAL_ONLY",
@@ -207,6 +255,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         result = verify_viability_gate()
     elif task_type == "verify_decision_journal":
         result = verify_decision_journal()
+    elif task_type == "verify_evaluation_receipt_persistence":
+        result = verify_evaluation_receipt_persistence()
     elif task_type == "proposal":
         description = task.get("description", "")
         if not isinstance(description, str):
