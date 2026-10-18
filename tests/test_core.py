@@ -544,3 +544,24 @@ if __name__ == "__main__":
             self.assertEqual(restored["result"], "PASS")
             self.assertEqual(restored["sha"], "c" * 40)
             self.assertEqual(list(queue_path.parent.glob(".TASK_QUEUE.json.*.tmp")), [])
+
+
+    def test_core_013_failed_atomic_replace_preserves_previous_queue(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            queue_path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(queue_path, [{
+                "id": "CORE-013-OLD",
+                "type": "proposal",
+                "description": "previous durable state",
+            }])
+            before = queue_path.read_bytes()
+
+            with patch("autopoesis.task_queue.os.replace", side_effect=OSError("simulated replace failure")):
+                with self.assertRaisesRegex(OSError, "simulated replace failure"):
+                    record_outcome_file(queue_path, "CORE-013-OLD", "SELECTED", "must not partially persist")
+
+            self.assertEqual(queue_path.read_bytes(), before)
+            self.assertEqual(load_queue(queue_path)["items"][0]["status"], "OPEN")
+            self.assertEqual(list(queue_path.parent.glob(".TASK_QUEUE.json.*.tmp")), [])
