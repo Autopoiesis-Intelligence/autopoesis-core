@@ -107,6 +107,31 @@ class EvolutionCoreTests(unittest.TestCase):
             self.assertEqual(reloaded["items"][0]["status"], "SELECTED")
             self.assertEqual(len(reloaded["history"]), 2)
 
+    def test_queue_merge_preserves_existing_history_order_and_appends_event(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            original_history = [
+                {"event": "STATUS_CHANGED", "task_id": "B", "at": "2026-01-02T00:00:00+00:00"},
+                {"event": "STATUS_CHANGED", "task_id": "A", "at": "2026-01-01T00:00:00+00:00"},
+            ]
+            path.write_text(json.dumps({
+                "version": 1,
+                "items": [],
+                "history": original_history,
+            }), encoding="utf-8")
+            candidate = {
+                "id": "DISC-HISTORY",
+                "type": "proposal",
+                "description": "Preserve event order.",
+            }
+
+            update_queue_file(path, [candidate])
+            queue = load_queue(path)
+
+            self.assertEqual(queue["history"][:2], original_history)
+            self.assertEqual(queue["history"][-1]["event"], "CANDIDATE_ADDED")
+            self.assertEqual(queue["history"][-1]["task_id"], "DISC-HISTORY")
+
     def test_queue_rejects_duplicate_ids_in_existing_state(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "TASK_QUEUE.json"
