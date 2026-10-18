@@ -263,7 +263,7 @@ class EvolutionCoreTests(unittest.TestCase):
             package = root / "autopoesis"
             package.mkdir()
             (package / "__init__.py").write_text("", encoding="utf-8")
-            (package / "example.py").write_text("VALUE = 42\\n", encoding="utf-8")
+            (package / "example.py").write_text("VALUE = 42\n", encoding="utf-8")
             result = verify_test_patch_in_sandbox(
                 {"id": "DISC-VERIFY", "source": "autopoesis/example.py"},
                 root,
@@ -280,7 +280,7 @@ class EvolutionCoreTests(unittest.TestCase):
             root = Path(directory)
             package = root / "autopoesis"
             package.mkdir()
-            (package / "example.py").write_text("VALUE = 1\\n", encoding="utf-8")
+            (package / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
             with self.assertRaises(ValueError):
                 verify_test_patch_in_sandbox(
                     {"id": "DISC-TIMEOUT", "source": "autopoesis/example.py"},
