@@ -338,5 +338,25 @@ class EvolutionCoreTests(unittest.TestCase):
 
 
 
+    def test_evaluation_receipt_persists_without_semantic_loss(self):
+        from run_tasks import verify_evaluation_receipt_persistence
+
+        result = verify_evaluation_receipt_persistence()
+        self.assertEqual(result["status"], "CHECKS_PASSED")
+        self.assertEqual(result["decision"], "ACCEPTED")
+        self.assertTrue(result["persisted_and_reloaded"])
+        self.assertTrue(result["fixtures_digest_present"])
+
+    def test_evaluation_receipt_persistence_is_reachable_as_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = execute_task(
+                {"id": "test-evaluation-journal", "type": "verify_evaluation_receipt_persistence"},
+                Path(directory) / "TASK_QUEUE.json",
+            )
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["result"]["status"], "CHECKS_PASSED")
+
+
+
 if __name__ == "__main__":
     unittest.main()
