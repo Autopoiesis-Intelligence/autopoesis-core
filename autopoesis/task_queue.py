@@ -79,6 +79,23 @@ def load_queue(path: Path) -> dict[str, Any]:
         if not isinstance(item.get("status"), str) or item.get("status") not in QUEUE_STATUSES:
             raise EvolutionError(f"Invalid status for queued task {item['id']}")
     _validate_history(queue["history"])
+
+    # The queue snapshot is the current state; its own audit trail must not
+    # contradict that state. Histories may omit transitions for legacy items,
+    # but when a transition exists, the final recorded destination must match
+    # the persisted item status.
+    latest_status: dict[str, str] = {}
+    for event in queue["history"]:
+        if event.get("event") == "STATUS_CHANGED":
+            latest_status[event["task_id"]] = event["to"]
+    for item in queue["items"]:
+        task_id = item["id"]
+        recorded_status = latest_status.get(task_id)
+        if recorded_status is not None and recorded_status != item["status"]:
+            raise EvolutionError(
+                f"Queue status/history mismatch for task {task_id!r}: "
+                f"item status is {item['status']!r}, latest history destination is {recorded_status!r}"
+            )
     return queue
 
 
