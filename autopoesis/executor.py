@@ -118,6 +118,7 @@ def validate_patch_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
 
     unsigned_payload = dict(artifact)
     unsigned_payload.pop("artifact_sha256", None)
+    unsigned_payload.pop("validation", None)
     actual_artifact_hash = hashlib.sha256(canonical_json(unsigned_payload).encode("utf-8")).hexdigest()
     if actual_artifact_hash != claimed_artifact_hash:
         raise ValueError("Patch artifact checksum mismatch")
