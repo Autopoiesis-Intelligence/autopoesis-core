@@ -18,6 +18,7 @@ The core has no user accounts, internal authorization framework, network service
 - Machine-readable results written to a file.
 - Static discovery of TODO/FIXME/HACK markers and source modules without conventional tests.
 - A JSON task queue with stable candidate IDs, duplicate suppression, lifecycle statuses, attempt counts, and append-only status history.
+- A replaceable `CodeWriter` interface and a bounded built-in writer that prepares a deterministic import-test patch artifact for an eligible Python module.
 - Standard-library-only tests and CI.
 
 ## CI and result files
@@ -28,7 +29,7 @@ To inspect a run, open [GitHub Actions](https://github.com/Autopoiesis-Intellige
 
 ## Important boundary
 
-This starter can execute the task types implemented in `run_tasks.py`. A task description alone cannot cause the program to invent and write new code. Connecting a code-writing agent is a separate next step; that adapter should produce a patch, run tests, and report results without requiring an internal authorization subsystem.
+This starter can execute the task types implemented in `run_tasks.py`. A task description alone cannot cause the program to invent and write new code. The `prepare_test_patch` task currently generates a reviewable patch artifact for one narrow case: adding an import-smoke test for an existing module under `autopoesis/`. It does not modify source files, apply patches, or run generated code. Broader code generation and isolated patch application remain separate stages. A future external or local model can implement the same `CodeWriter` interface without changing the core task contract.
 
 ## Run
 
@@ -37,4 +38,4 @@ python run_tasks.py
 python -m unittest discover -s tests -v
 ```
 
-Edit `TASKS.json` to configure work. `queue_discovered_tasks` merges newly discovered candidates into `TASK_QUEUE.json` without duplicating existing IDs or overwriting their statuses. Use `update_task_status` with `task_id`, `status`, and optional `note` to persist a lifecycle change. Supported statuses are `OPEN`, `SELECTED`, `IN_PROGRESS`, `DONE`, and `REJECTED`; moving a task to `IN_PROGRESS` increments its attempt count. The runner replaces `RESULTS.json` on each run so the file represents the latest run. Use `python run_tasks.py --queue path/to/TASK_QUEUE.json` to choose a queue file.
+Edit `TASKS.json` to configure work. `queue_discovered_tasks` merges newly discovered candidates into `TASK_QUEUE.json` without duplicating existing IDs or overwriting their statuses. Use `update_task_status` with `task_id`, `status`, and optional `note` to persist a lifecycle change. To prepare a bounded code patch, add a `prepare_test_patch` task with an `id` and a `source` path such as `autopoesis/task_queue.py`; the generated patch artifact is included in `RESULTS.json` and is not applied automatically. Supported statuses are `OPEN`, `SELECTED`, `IN_PROGRESS`, `DONE`, and `REJECTED`; moving a task to `IN_PROGRESS` increments its attempt count. The runner replaces `RESULTS.json` on each run so the file represents the latest run. Use `python run_tasks.py --queue path/to/TASK_QUEUE.json` to choose a queue file.
