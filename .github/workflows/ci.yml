@@ -24,6 +24,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Validate restore run ID
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_run_id != '' }}
+        env:
+          RESTORE_RUN_ID: ${{ inputs.restore_run_id }}
+        run: |
+          if [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "restore_run_id must contain digits only" >&2
+            exit 1
+          fi
       - name: Restore queue snapshot from a prior run
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_run_id != '' }}
         uses: actions/download-artifact@v4
@@ -32,6 +41,14 @@ jobs:
           path: .
           run-id: ${{ inputs.restore_run_id }}
           github-token: ${{ github.token }}
+      - name: Validate restored queue snapshot
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_run_id != '' }}
+        run: |
+          if [[ ! -f TASK_QUEUE.json ]]; then
+            echo "Restored artifact does not contain TASK_QUEUE.json" >&2
+            exit 1
+          fi
+          python -c "from pathlib import Path; from autopoesis.task_queue import load_queue; load_queue(Path('TASK_QUEUE.json'))"
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
