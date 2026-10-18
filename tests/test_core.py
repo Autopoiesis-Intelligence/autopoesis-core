@@ -7,6 +7,7 @@ from pathlib import Path
 
 from autopoesis.core import EvolutionError, digest_state, evolve
 from run_tasks import discover_tasks
+from autopoesis.task_queue import load_queue, merge_candidates, record_outcome, update_queue_file
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +76,44 @@ class EvolutionCoreTests(unittest.TestCase):
             result = discover_tasks(root)
             self.assertEqual(result["status"], "NO_CANDIDATES")
             self.assertEqual(result["candidate_count"], 0)
+
+
+    def test_queue_merge_is_idempotent_and_preserves_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            candidate = {
+                "id": "DISC-123",
+                "type": "proposal",
+                "source": "autopoesis/example.py",
+                "evidence": "missing focused test",
+                "description": "Add focused tests.",
+            }
+            first = update_queue_file(path, [candidate])
+            self.assertEqual(first["added"], 1)
+            self.assertEqual(first["total"], 1)
+            queue = load_queue(path)
+            queue = record_outcome(queue, "DISC-123", "SELECTED", "highest-value candidate")
+            path.write_text(json.dumps(queue), encoding="utf-8")
+
+            second = update_queue_file(path, [candidate])
+            self.assertEqual(second["added"], 0)
+            reloaded = load_queue(path)
+            self.assertEqual(reloaded["items"][0]["status"], "SELECTED")
+            self.assertEqual(len(reloaded["history"]), 2)
+
+    def test_queue_rejects_duplicate_ids_in_existing_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            path.write_text(json.dumps({
+                "version": 1,
+                "items": [
+                    {"id": "DUP", "status": "OPEN"},
+                    {"id": "DUP", "status": "OPEN"},
+                ],
+                "history": [],
+            }), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_queue(path)
 
 
 if __name__ == "__main__":
