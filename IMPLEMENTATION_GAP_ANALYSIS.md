@@ -227,3 +227,10 @@ Evidence ladder: DESIGN = defined; IMPLEMENTED = source and tests added; REACHAB
 - The current artifact revises the earlier host picture: Docker daemon is reachable; the expected Python image is absent; Podman reports `rootless=true`; `unshare` directly fails with `Operation not permitted`. This does not prove Podman's isolation configuration is sufficient, but it makes rootless Podman a candidate worth comparing against Docker before choosing an adapter.
 - CI PASS proves the command builder and its tests ran successfully; it does not prove that a container has been started or that any isolation control works against hostile code.
 - Next sequence: add a read-only Podman image-readiness probe, compare exact engine constraints, and select one runtime only after the image is pinned and the relevant controls can be tested. Candidate execution remains disabled.
+
+
+### SEQ L: Podman image readiness probe (implementation added; CI pending)
+
+- Added a fixed `podman image inspect docker.io/library/python:3.12-slim` probe. It does not pull images or execute candidate code.
+- The runtime report now distinguishes Podman rootless availability from whether the required Python image is cached in Podman's own image store. Docker and Podman image stores are not assumed to be shared.
+- CI artifact on the exact resulting HEAD must determine whether the candidate image is already available. No engine has been selected for execution yet.
