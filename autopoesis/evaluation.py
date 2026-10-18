@@ -52,7 +52,7 @@ def _depth(value: Any) -> int:
         )
     if isinstance(value, list):
         return 1 + max((_depth(item) for item in value), default=0)
-    return 0
+    return 1
 
 
 def _receipt(*, candidate_id: str, parent_digest: str | None,
