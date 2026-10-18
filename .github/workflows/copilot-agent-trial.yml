@@ -66,15 +66,43 @@ jobs:
           test -s AGENT_TRIAL.md || { echo "::error::Agent produced no AGENT_TRIAL.md"; exit 1; }
           bytes="$(wc -c < AGENT_TRIAL.md | tr -d '[:space:]')"
           test "$bytes" -le 12000 || { echo "::error::Agent output exceeds 12000 bytes"; exit 1; }
-          changed="$(git diff --name-only)"
-          test "$changed" = "AGENT_TRIAL.md" || {
+          changed="$(git status --porcelain --untracked-files=all)"
+          test "$changed" = "?? AGENT_TRIAL.md" || {
             echo "::error::Unexpected changed-file set: $changed"
             exit 1
           }
-          git diff --check
           mkdir -p agent-trial-output
           cp AGENT_TRIAL.md agent-trial-output/AGENT_TRIAL.md
-          git diff -- AGENT_TRIAL.md > agent-trial-output/agent.patch
+          set +e
+          git diff --no-index -- /dev/null AGENT_TRIAL.md > agent-trial-output/agent.patch
+          diff_status=$?
+          set -e
+          test "$diff_status" -eq 1 || {
+            echo "::error::Could not create expected patch (exit $diff_status)"
+            exit 1
+          }
+          if grep -nE '[[:blank:]]+
+          {
+            echo "## Bounded Copilot agent trial"
+            echo "- Task: one documentation-only queue-persistence note"
+            echo "- Changed path: AGENT_TRIAL.md"
+            echo "- Output bytes: $bytes"
+            echo "- GitHub write permission: none"
+            echo "- Automatic merge: none"
+            echo "- Patch saved as artifact; source branch was not pushed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-bounded-agent-trial
+          path: agent-trial-output/
+          if-no-files-found: error
+          retention-days: 7
+ AGENT_TRIAL.md; then
+            echo "::error::Generated file contains trailing whitespace"
+            exit 1
+          fi
           {
             echo "## Bounded Copilot agent trial"
             echo "- Task: one documentation-only queue-persistence note"
