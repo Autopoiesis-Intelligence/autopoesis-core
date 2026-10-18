@@ -480,6 +480,7 @@ class EvolutionCoreTests(unittest.TestCase):
         self.assertFalse(result["execution_authorized"])
         self.assertFalse(result["sandbox_verified"])
         self.assertIn("docker_daemon", result["probes"])
+        self.assertIn("python_image_cached", result["probes"])
         self.assertIn("podman_runtime", result["probes"])
         self.assertIn("user_namespace", result["probes"])
 
