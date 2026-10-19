@@ -21,7 +21,7 @@ def _run_id_text(value: str | int) -> str:
     text = str(value)
     if not text.isdigit():
         raise ValueError("Source run ID must contain decimal digits")
-    return text
+    return str(int(text))
 
 
 def create_queue_snapshot_manifest(

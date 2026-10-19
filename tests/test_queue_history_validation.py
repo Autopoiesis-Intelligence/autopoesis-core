@@ -6,7 +6,13 @@ import unittest
 from pathlib import Path
 
 from autopoesis.core import EvolutionError
-from autopoesis.task_queue import load_queue, update_queue_file, record_outcome_file, record_verification_file
+from autopoesis.task_queue import (
+    load_queue,
+    record_outcome,
+    record_outcome_file,
+    record_verification_file,
+    update_queue_file,
+)
 
 
 class QueueHistoryValidationTests(unittest.TestCase):
@@ -70,6 +76,37 @@ class QueueHistoryValidationTests(unittest.TestCase):
         path.write_text(json.dumps(payload), encoding="utf-8")
         with self.assertRaisesRegex(EvolutionError, "Invalid status"):
             load_queue(path)
+
+    def test_rejects_empty_task_ids_and_invalid_attempt_counts(self):
+        for task_id in ("", "   "):
+            with self.subTest(task_id=task_id):
+                path = self._write_queue([])
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                payload["items"][0]["id"] = task_id
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(EvolutionError, "non-empty string id"):
+                    load_queue(path)
+
+        for attempts in (-1, True, "1", None):
+            with self.subTest(attempts=attempts):
+                path = self._write_queue([])
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                payload["items"][0]["attempts"] = attempts
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(EvolutionError, "attempts count"):
+                    load_queue(path)
+
+    def test_record_outcome_rejects_invalid_note_and_attempt_count(self):
+        queue = {
+            "version": 1,
+            "items": [{"id": "TASK-1", "status": "OPEN", "attempts": 0}],
+            "history": [],
+        }
+        with self.assertRaisesRegex(EvolutionError, "note must be a string"):
+            record_outcome(queue, "TASK-1", "DONE", ["not a note"])
+        queue["items"][0]["attempts"] = -1
+        with self.assertRaisesRegex(EvolutionError, "attempts count"):
+            record_outcome(queue, "TASK-1", "IN_PROGRESS")
 
     def test_rejects_invalid_status_transition_history(self):
         with self.assertRaisesRegex(EvolutionError, "destination status"):

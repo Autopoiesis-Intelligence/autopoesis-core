@@ -71,19 +71,30 @@ def load_queue(path: Path) -> dict[str, Any]:
         queue = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise EvolutionError(f"Cannot read task queue: {exc}") from exc
-    if not isinstance(queue, dict) or queue.get("version") != QUEUE_VERSION:
+    if (
+        not isinstance(queue, dict)
+        or type(queue.get("version")) is not int
+        or queue.get("version") != QUEUE_VERSION
+    ):
         raise EvolutionError("Unsupported task queue format")
     if not isinstance(queue.get("items"), list) or not isinstance(queue.get("history"), list):
         raise EvolutionError("Task queue must contain items and history arrays")
     seen: set[str] = set()
     for item in queue["items"]:
-        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
-            raise EvolutionError("Every queued item needs a string id")
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("id"), str)
+            or not item["id"].strip()
+        ):
+            raise EvolutionError("Every queued item needs a non-empty string id")
         if item["id"] in seen:
             raise EvolutionError(f"Duplicate queued task id: {item['id']}")
         seen.add(item["id"])
         if not isinstance(item.get("status"), str) or item.get("status") not in QUEUE_STATUSES:
             raise EvolutionError(f"Invalid status for queued task {item['id']}")
+        attempts = item.get("attempts", 0)
+        if type(attempts) is not int or attempts < 0:
+            raise EvolutionError(f"Invalid attempts count for queued task {item['id']}")
     _validate_history(queue["history"])
 
     # The queue snapshot is the current state; its own audit trail must not
@@ -158,17 +169,26 @@ def merge_candidates(queue: dict[str, Any], candidates: list[dict[str, Any]]) ->
 
 def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str = "") -> dict[str, Any]:
     """Record a bounded lifecycle transition without executing the task."""
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise EvolutionError("Task id must be a non-empty string")
     if not isinstance(status, str) or status not in QUEUE_STATUSES:
         raise EvolutionError(f"Unsupported queue status: {status!r}")
+    if not isinstance(note, str):
+        raise EvolutionError("Transition note must be a string")
     updated = json.loads(canonical_json(queue))
     matches = [item for item in updated.get("items", []) if item.get("id") == task_id]
     if len(matches) != 1:
         raise EvolutionError(f"Expected exactly one queued task with id {task_id!r}")
     item = matches[0]
-    previous = item["status"]
+    previous = item.get("status")
+    if not isinstance(previous, str) or previous not in QUEUE_STATUSES:
+        raise EvolutionError(f"Invalid status for queued task {task_id!r}")
+    attempts = item.get("attempts", 0)
+    if type(attempts) is not int or attempts < 0:
+        raise EvolutionError(f"Invalid attempts count for queued task {task_id!r}")
     item["status"] = status
     if status == "IN_PROGRESS":
-        item["attempts"] = int(item.get("attempts", 0)) + 1
+        item["attempts"] = attempts + 1
     timestamp = datetime.now(timezone.utc).isoformat()
     updated.setdefault("history", []).append({
         "event": "STATUS_CHANGED",

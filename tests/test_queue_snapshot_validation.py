@@ -37,6 +37,19 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             with self.assertRaises(EvolutionError):
                 load_queue(snapshot)
 
+    def test_boolean_and_float_snapshot_versions_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = Path(directory) / "TASK_QUEUE.json"
+            for version in (True, 1.0):
+                with self.subTest(version=version):
+                    snapshot.write_text(json.dumps({
+                        "version": version,
+                        "items": [],
+                        "history": [],
+                    }), encoding="utf-8")
+                    with self.assertRaises(EvolutionError):
+                        load_queue(snapshot)
+
     def test_invalid_task_status_in_snapshot_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             snapshot = Path(directory) / "TASK_QUEUE.json"
@@ -236,6 +249,14 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         self.assertEqual(provenance["source_head_sha"], "a" * 40)
         self.assertEqual(provenance["source_workflow_path"], ".github/workflows/ci.yml")
         self.assertEqual(provenance["source_conclusion"], "success")
+
+    def test_source_run_validation_normalizes_leading_zero_run_id(self):
+        provenance = validate_restore_source_run(
+            self._valid_source_run(),
+            requested_run_id="00012345",
+            expected_repository="Autopoiesis-Intelligence/autopoesis-core",
+        )
+        self.assertEqual(provenance["source_run_id"], 12345)
 
     def test_source_run_validation_rejects_wrong_identity_status_event_workflow_or_repo(self):
         valid = self._valid_source_run()
