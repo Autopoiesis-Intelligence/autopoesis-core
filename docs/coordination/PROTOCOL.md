@@ -10,9 +10,10 @@ Coordinate work on this repository when GPT and Claude operate on separate sched
 
 1. Live GitHub repository state: exact refs/SHAs, PR base/head, workflow runs and artifacts.
 2. Merged repository policy and this protocol, once accepted.
-3. Open PR diffs and review comments for proposed changes.
-4. `docs/coordination/STATE.md`, `DECISIONS.md`, and `LOG.md` as navigation and handoff.
-5. Agent reports, old chat summaries, and prior checkpoints as unverified pointers only.
+3. Issue [#22](https://github.com/Autopoiesis-Intelligence/autopoiesis-core/issues/22) is the shared mutable task-claim and handoff thread; its claims must still be checked against live GitHub state.
+4. Open PR diffs and review comments for proposed changes.
+5. `docs/coordination/STATE.md`, `DECISIONS.md`, and `LOG.md` as versioned navigation/history.
+6. Agent reports, old chat summaries, and prior checkpoints as unverified pointers only.
 
 If sources conflict, stop and record the discrepancy. Never infer current state from an old SHA or report.
 
@@ -37,7 +38,8 @@ Every scheduled run should be a bounded reconciliation cycle, not an instruction
 - GPT and Claude must not edit the same branch or overlapping files concurrently.
 - Before starting work, inspect recent commits, PR updates, and the live handoff for an existing claim.
 - A claim is stale only after checking GitHub activity and asking for/reconciling the latest available result; elapsed time alone does not prove that work stopped.
-- If a shared mutable issue/board is later configured, use it for short-lived claims and handoffs. Until then, use PR descriptions/comments and this versioned record; never pretend a coordination lock exists when it does not.
+- Use issue #22 for short-lived claims and meaningful handoffs. Before edits, post a claim comment containing agent, task ID, starting SHA, branch/PR, files in scope, acceptance criteria, dependencies, and UTC time; after completion, post the result and release the claim.
+- Issue comments are not an atomic lock. If claims overlap, the active owner is unclear, or two runs start concurrently, stop before editing and reconcile. Never pretend a coordination lock exists when it does not.
 
 ## Evidence requirements
 
