@@ -143,47 +143,31 @@ jobs:
         if: ${{ inputs.restore_run_id != '' }}
         run: |
           python - <<'PY'
+          import json
           import shutil
           from pathlib import Path
+          from autopoesis.queue_snapshot import validate_queue_snapshot
           from autopoesis.task_queue import load_queue
-
-          import hashlib
-          import json
 
           snapshot = Path(".queue-restore/TASK_QUEUE.json")
           manifest_path = Path(".queue-restore/QUEUE_SNAPSHOT_MANIFEST.json")
-          if not snapshot.is_file():
-              raise SystemExit("Requested artifact does not contain TASK_QUEUE.json")
-          if not manifest_path.is_file():
-              raise SystemExit("Requested artifact does not contain QUEUE_SNAPSHOT_MANIFEST.json")
-          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
           provenance_path = Path("QUEUE_RESTORE_PROVENANCE.json")
           provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-          source_sha = provenance.get("source_head_sha")
-          source_run_id = str(provenance.get("source_run_id", ""))
-          if manifest.get("source_run_id") != source_run_id:
-              raise SystemExit("Snapshot manifest run ID does not match verified source run")
-          if manifest.get("source_head_sha") != source_sha:
-              raise SystemExit("Snapshot manifest SHA does not match verified source run SHA")
-          if manifest.get("source_repository") != provenance.get("source_repository"):
-              raise SystemExit("Snapshot manifest repository does not match verified source repository")
-          snapshot_bytes = snapshot.read_bytes()
-          snapshot_digest = hashlib.sha256(snapshot_bytes).hexdigest()
-          if manifest.get("task_queue_sha256") != snapshot_digest:
-              raise SystemExit("TASK_QUEUE.json SHA-256 does not match source snapshot manifest")
-          if manifest.get("task_queue_size_bytes") != len(snapshot_bytes):
-              raise SystemExit("TASK_QUEUE.json size does not match source snapshot manifest")
-          load_queue(snapshot)
+          validation = validate_queue_snapshot(
+              snapshot,
+              manifest_path,
+              source_run_id=provenance.get("source_run_id"),
+              source_head_sha=provenance.get("source_head_sha"),
+              source_repository=provenance.get("source_repository"),
+          )
           shutil.copyfile(snapshot, "TASK_QUEUE.json")
           restored = Path("TASK_QUEUE.json")
-          load_queue(restored)
-          provenance["source_manifest_sha256"] = hashlib.sha256(
-              manifest_path.read_bytes()
-          ).hexdigest()
-          provenance["source_manifest_task_queue_sha256"] = manifest["task_queue_sha256"]
-          provenance["restored_queue_sha256"] = hashlib.sha256(
-              restored.read_bytes()
-          ).hexdigest()
+          restored_queue = load_queue(restored)
+          if restored_queue != validation["queue"]:
+              raise SystemExit("Installed queue does not match the validated source snapshot")
+          provenance["source_manifest_sha256"] = validation["source_manifest_sha256"]
+          provenance["source_manifest_task_queue_sha256"] = validation["task_queue_sha256"]
+          provenance["restored_queue_sha256"] = validation["task_queue_sha256"]
           provenance["restored_queue_size_bytes"] = restored.stat().st_size
           provenance_path.write_text(
               json.dumps(provenance, indent=2, sort_keys=True) + "\n",
@@ -299,19 +283,17 @@ jobs:
           SOURCE_REPOSITORY: ${{ github.repository }}
         run: |
           python - <<'PY'
-          import hashlib
           import json
           import os
           from pathlib import Path
+          from autopoesis.queue_snapshot import create_queue_snapshot_manifest
 
-          queue_path = Path("TASK_QUEUE.json")
-          manifest = {
-              "source_run_id": os.environ["SOURCE_RUN_ID"],
-              "source_head_sha": os.environ["SOURCE_HEAD_SHA"],
-              "source_repository": os.environ["SOURCE_REPOSITORY"],
-              "task_queue_sha256": hashlib.sha256(queue_path.read_bytes()).hexdigest(),
-              "task_queue_size_bytes": queue_path.stat().st_size,
-          }
+          manifest = create_queue_snapshot_manifest(
+              Path("TASK_QUEUE.json"),
+              source_run_id=os.environ["SOURCE_RUN_ID"],
+              source_head_sha=os.environ["SOURCE_HEAD_SHA"],
+              source_repository=os.environ["SOURCE_REPOSITORY"],
+          )
           Path("QUEUE_SNAPSHOT_MANIFEST.json").write_text(
               json.dumps(manifest, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",

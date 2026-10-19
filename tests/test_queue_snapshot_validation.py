@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from autopoesis.core import EvolutionError
+from autopoesis.queue_snapshot import create_queue_snapshot_manifest, validate_queue_snapshot
 from autopoesis.task_queue import load_queue, update_queue_file
 from run_tasks import run
 
@@ -126,6 +127,84 @@ class QueueSnapshotValidationTests(unittest.TestCase):
                 prior_history,
             )
             self.assertGreaterEqual(len(after_second_run["history"]), len(prior_history))
+
+
+    def _write_bound_snapshot(self, root):
+        snapshot = root / "TASK_QUEUE.json"
+        manifest_path = root / "QUEUE_SNAPSHOT_MANIFEST.json"
+        update_queue_file(snapshot, [{"id": "RESTORE-1", "type": "probe"}])
+        expected = {
+            "source_run_id": 12345,
+            "source_head_sha": "a" * 40,
+            "source_repository": "Autopoiesis-Intelligence/autopoesis-core",
+        }
+        manifest = create_queue_snapshot_manifest(snapshot, **expected)
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return snapshot, manifest_path, expected, manifest
+
+    def test_snapshot_manifest_round_trip_binds_queue_to_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot, manifest_path, expected, manifest = self._write_bound_snapshot(
+                Path(directory)
+            )
+
+            result = validate_queue_snapshot(
+                snapshot, manifest_path, **expected
+            )
+
+            self.assertEqual(result["queue"], load_queue(snapshot))
+            self.assertEqual(result["task_queue_sha256"], manifest["task_queue_sha256"])
+            self.assertEqual(result["task_queue_size_bytes"], manifest["task_queue_size_bytes"])
+            self.assertEqual(len(result["source_manifest_sha256"]), 64)
+
+    def test_snapshot_validation_rejects_wrong_source_run_sha_or_repository(self):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot, manifest_path, expected, _manifest = self._write_bound_snapshot(
+                Path(directory)
+            )
+            wrong_sources = (
+                ({**expected, "source_run_id": 54321}, "run ID"),
+                ({**expected, "source_head_sha": "b" * 40}, "SHA"),
+                ({**expected, "source_repository": "someone/else"}, "repository"),
+            )
+
+            for source, message in wrong_sources:
+                with self.subTest(source=source), self.assertRaisesRegex(ValueError, message):
+                    validate_queue_snapshot(snapshot, manifest_path, **source)
+
+    def test_snapshot_validation_rejects_tampered_queue_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot, manifest_path, expected, _manifest = self._write_bound_snapshot(
+                Path(directory)
+            )
+            snapshot.write_bytes(snapshot.read_bytes() + b" ")
+
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                validate_queue_snapshot(snapshot, manifest_path, **expected)
+
+    def test_snapshot_validation_rejects_wrong_queue_size(self):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot, manifest_path, expected, manifest = self._write_bound_snapshot(
+                Path(directory)
+            )
+            manifest["task_queue_size_bytes"] += 1
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "size"):
+                validate_queue_snapshot(snapshot, manifest_path, **expected)
+
+    def test_snapshot_validation_fails_closed_when_snapshot_or_manifest_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot, manifest_path, expected, _manifest = self._write_bound_snapshot(root)
+            snapshot.unlink()
+            with self.assertRaisesRegex(ValueError, "snapshot file is missing"):
+                validate_queue_snapshot(snapshot, manifest_path, **expected)
+
+            snapshot, manifest_path, expected, _manifest = self._write_bound_snapshot(root)
+            manifest_path.unlink()
+            with self.assertRaisesRegex(ValueError, "manifest file is missing"):
+                validate_queue_snapshot(snapshot, manifest_path, **expected)
 
 
 if __name__ == "__main__":
