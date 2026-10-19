@@ -18,7 +18,13 @@ Record durable decisions here. Each entry must separate the decision from its ra
 - Required controls: prevent overlapping scheduler runs, finite timeout, exact-SHA checks, no automatic merge/close, no sensitive workflow/settings changes without approval.
 - Evidence required: scheduler configuration and at least one observed run with its exact result; schedule declaration alone is not runtime proof.
 
-## D-003 — No automatic merge
+## D-003 — Shared live handoff
+
+- Status: CONFIGURED; issue #22 is open.
+- Decision: Use [issue #22](https://github.com/Autopoiesis-Intelligence/autopoiesis-core/issues/22) for task claims, blockers, and meaningful cross-agent handoffs. Use the versioned files here for durable rules/history, not minute-by-minute heartbeats.
+- Limitation: Issue comments are not an atomic lock; conflicting claims require stopping and reconciling.
+
+## D-004 — No automatic merge
 
 - Status: ACCEPTED as a safety constraint in the coordination plan.
 - Decision: GPT and Claude may prepare branches/PRs and audit evidence, but must not automatically merge or close PRs.
