@@ -58,13 +58,16 @@ def queue_write_lock(path: Path) -> Iterator[None]:
     writers that load the same snapshot would both succeed and the second
     would silently discard the first. A concurrent writer is rejected
     instead of waiting, so a caller never reports success for an update
-    that another writer overwrote.
+    that another writer overwrote. The lock is not reentrant: do not nest
+    helpers that take it, even in the same process.
     """
     if fcntl is None:
         raise EvolutionError("Task queue locking is not supported on this platform")
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_name(f".{path.name}.lock")
-    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    descriptor = os.open(
+        lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
     try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
