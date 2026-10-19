@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from autopoesis.core import EvolutionError
 from autopoesis.task_queue import (
@@ -234,6 +235,19 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "CANDIDATE_ADDED",
                 "STATUS_CHANGED",
             ])
+
+    def test_failed_atomic_replace_preserves_previous_queue_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{"id": "TASK-1", "type": "proposal"}])
+            original_bytes = path.read_bytes()
+
+            with patch("autopoesis.task_queue.os.replace", side_effect=OSError("disk error")):
+                with self.assertRaisesRegex(OSError, "disk error"):
+                    record_outcome_file(path, "TASK-1", "DONE", "must not partially persist")
+
+            self.assertEqual(path.read_bytes(), original_bytes)
+            self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
 
 
 if __name__ == "__main__":

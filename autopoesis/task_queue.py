@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,6 +16,31 @@ from .core import EvolutionError, canonical_json
 QUEUE_VERSION = 1
 QUEUE_STATUSES = {"OPEN", "SELECTED", "IN_PROGRESS", "DONE", "REJECTED"}
 QUEUE_HISTORY_EVENTS = {"CANDIDATE_ADDED", "STATUS_CHANGED", "VERIFICATION_RECORDED"}
+
+
+def _write_queue_atomically(path: Path, queue: dict[str, Any]) -> None:
+    """Write a complete queue snapshot before atomically replacing the old one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(queue, indent=2, ensure_ascii=False) + "\n"
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        mode = None
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            if mode is not None:
+                os.fchmod(stream.fileno(), mode)
+            stream.write(serialized)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def empty_queue() -> dict[str, Any]:
@@ -233,8 +261,7 @@ def record_verification_file(
     }
     updated = json.loads(canonical_json(queue))
     updated["history"].append(event)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_queue_atomically(path, updated)
     return {"task_id": task_id, "verification_status": verification_status, "path": path.as_posix()}
 
 
@@ -242,8 +269,7 @@ def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str,
     """Merge discovered candidates into a local persistent JSON queue."""
     current = load_queue(path)
     result = merge_candidates(current, candidates)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(result["queue"], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_queue_atomically(path, result["queue"])
     return {"added": result["added"], "total": result["total"], "path": path.as_posix()}
 
 
@@ -251,6 +277,5 @@ def record_outcome_file(path: Path, task_id: str, status: str, note: str = "") -
     """Persist a status transition and its audit event to the queue file."""
     queue = load_queue(path)
     updated = record_outcome(queue, task_id, status, note)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(updated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_queue_atomically(path, updated)
     return {"task_id": task_id, "status": status, "path": path.as_posix()}

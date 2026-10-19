@@ -18,6 +18,7 @@ The core has no user accounts, internal authorization framework, network service
 - Machine-readable results written to a file.
 - Static discovery of TODO/FIXME/HACK markers and source modules without conventional tests.
 - A JSON task queue with stable candidate IDs, duplicate suppression, lifecycle statuses, attempt counts, status history, and persisted verification-evidence records.
+- Queue updates are written to a same-directory temporary file and atomically replace the prior snapshot, so an interrupted write does not expose a partially serialized queue.
 - A replaceable `CodeWriter` interface and a bounded built-in writer that prepares a deterministic import-test patch artifact for an eligible Python module.
 - Standard-library-only tests and CI.
 
