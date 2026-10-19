@@ -250,5 +250,27 @@ class QueueHistoryValidationTests(unittest.TestCase):
             self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
 
 
+    def test_missing_queue_file_returns_empty_queue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing_path = Path(directory) / "missing" / "TASK_QUEUE.json"
+            self.assertEqual(load_queue(missing_path), {
+                "version": 1,
+                "items": [],
+                "history": [],
+            })
+
+    def test_queue_read_permission_error_fails_closed(self):
+        path = Path("unreadable-TASK_QUEUE.json")
+        with patch.object(Path, "read_text", side_effect=PermissionError("permission denied")):
+            with self.assertRaisesRegex(EvolutionError, "Cannot read task queue"):
+                load_queue(path)
+
+    def test_queue_read_unicode_error_fails_closed(self):
+        path = Path("invalid-encoding-TASK_QUEUE.json")
+        with patch.object(Path, "read_text", side_effect=UnicodeError("invalid text")):
+            with self.assertRaisesRegex(EvolutionError, "Cannot read task queue"):
+                load_queue(path)
+
+
 if __name__ == "__main__":
     unittest.main()
