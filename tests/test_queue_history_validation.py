@@ -53,6 +53,14 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "task_id": "TASK-1",
                 "at": "",
             }]))
+        for invalid_timestamp in ("yesterday", "2026-01-01T00:00:00", "2026-99-99T00:00:00+00:00"):
+            with self.subTest(at=invalid_timestamp):
+                with self.assertRaisesRegex(EvolutionError, "ISO 8601|timezone offset"):
+                    load_queue(self._write_queue([{
+                        "event": "CANDIDATE_ADDED",
+                        "task_id": "TASK-1",
+                        "at": invalid_timestamp,
+                    }]))
 
     def test_rejects_non_string_queue_status(self):
         # The task status is independently validated before history records.
