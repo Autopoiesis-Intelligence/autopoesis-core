@@ -295,7 +295,7 @@ jobs:
         if: always() && hashFiles('TASK_QUEUE.json') != ''
         env:
           SOURCE_RUN_ID: ${{ github.run_id }}
-          SOURCE_HEAD_SHA: ${{ github.sha }}
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           SOURCE_REPOSITORY: ${{ github.repository }}
         run: |
           python - <<'PY'
