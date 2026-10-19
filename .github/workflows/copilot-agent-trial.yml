@@ -6,9 +6,15 @@ on:
 permissions:
   contents: read
 
+# One run at a time across all refs: every run reads and writes the shared budget ledger.
 concurrency:
-  group: copilot-agent-trial-${{ github.ref }}
+  group: copilot-agent-budget
   cancel-in-progress: false
+
+env:
+  BUDGET_LEDGER: .agent-budget/copilot.json
+  TASK_KIND: docs-note
+  PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
   bounded-documentation-task:
@@ -32,28 +38,70 @@ jobs:
           fi
           echo "Required secret is present; value not displayed."
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore budget ledger
+        uses: actions/cache/restore@v4
+        with:
+          path: .agent-budget
+          key: copilot-budget-${{ github.run_id }}
+          restore-keys: copilot-budget-
+
+      - name: Ask the core for a budget decision
+        id: budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          python -m autopoesis.agent_budget plan --ledger "$BUDGET_LEDGER" --kind "$TASK_KIND" > budget-plan.json
+          status=$?
+          set -e
+          cat budget-plan.json
+          if [[ "$status" -eq 3 ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "## Copilot run skipped by the core budget" >> "$GITHUB_STEP_SUMMARY"
+            python -c 'import json; d=json.load(open("budget-plan.json")); print("- Reason:", d["reason"]); print("- Retry after:", d.get("retry_after"))' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          test "$status" -eq 0
+          cap="$(python -c 'import json; print(json.load(open("budget-plan.json"))["max_ai_credits"])')"
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "cap=$cap" >> "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
+        if: steps.budget.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
       - name: Install Copilot CLI
+        if: steps.budget.outputs.run == 'true'
         run: npm install --global @github/copilot
 
       - name: Generate one bounded documentation note
+        id: agent
+        if: steps.budget.outputs.run == 'true'
         shell: bash
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          CREDIT_CAP: ${{ steps.budget.outputs.cap }}
         run: |
           set -euo pipefail
-          stderr_file="$(mktemp)"
+          mkdir -p "$RUNNER_TEMP/budget"
+          stderr_file="$RUNNER_TEMP/budget/stderr.txt"
+          usage_file="$RUNNER_TEMP/budget/usage.json"
           response_file="$(mktemp)"
-          trap 'rm -f "$stderr_file" "$response_file"' EXIT
+          trap 'rm -f "$response_file"' EXIT
           prompt='Inspect README.md and run_tasks.py using read-only tools. Return only the complete contents of one concise Markdown document. It must document the repository evidence about TASK_QUEUE.json and whether queue state is restored across separate clean GitHub Actions runs; do not assume the limitation is true unless the files support it. Then propose one small acceptance test for deterministic queue restoration. Separate repository facts from proposals. Do not use shell, network, git, or external tools. Do not create or edit files; only return the Markdown text.'
           set +e
-          timeout 300s copilot -p "$prompt" -s --no-ask-user --available-tools='view,grep,glob' --deny-tool='shell' >"$response_file" 2>"$stderr_file"
+          timeout 300s copilot -p "$prompt" -s --no-ask-user --available-tools='view,grep,glob' --deny-tool='shell' \
+            --max-ai-credits "$CREDIT_CAP" --usage-output-file "$usage_file" >"$response_file" 2>"$stderr_file"
           cli_status=$?
           set -e
+          echo "exit_code=$cli_status" >> "$GITHUB_OUTPUT"
           if [[ "$cli_status" -ne 0 ]]; then
             echo "::error::Copilot task failed (exit $cli_status). Redacted diagnostic follows."
             python -c 'import os,pathlib,sys; s=pathlib.Path(sys.argv[1]).read_text(errors="replace"); print(s.replace(os.environ.get("COPILOT_GITHUB_TOKEN", ""), "[REDACTED]"))' "$stderr_file"
@@ -70,14 +118,47 @@ jobs:
           }
           cat "$response_file" > AGENT_TRIAL.md
 
+      - name: Record the run in the budget ledger
+        if: always() && steps.budget.outputs.run == 'true'
+        shell: bash
+        env:
+          CREDIT_CAP: ${{ steps.budget.outputs.cap }}
+          EXIT_CODE: ${{ steps.agent.outputs.exit_code || '1' }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Redact before the core reads it; stderr never leaves the runner.
+          stderr_file="$RUNNER_TEMP/budget/stderr.txt"
+          if [[ -f "$stderr_file" ]]; then
+            python -c 'import os,pathlib,sys; p=pathlib.Path(sys.argv[1]); t=os.environ.get("COPILOT_GITHUB_TOKEN",""); s=p.read_text(errors="replace"); p.write_text(s.replace(t,"[REDACTED]") if t else s)' "$stderr_file"
+          fi
+          python -m autopoesis.agent_budget record --ledger "$BUDGET_LEDGER" --kind "$TASK_KIND" \
+            --task-id "run-${GITHUB_RUN_ID}" --cap "$CREDIT_CAP" --exit-code "$EXIT_CODE" \
+            --usage-file "$RUNNER_TEMP/budget/usage.json" --stderr-file "$stderr_file" | tee budget-record.json
+          {
+            echo "## Core budget"
+            echo "- Credit cap for this run: $CREDIT_CAP"
+            echo '```json'
+            cat budget-record.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save budget ledger
+        if: always() && steps.budget.outputs.run == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .agent-budget
+          key: copilot-budget-${{ github.run_id }}-${{ github.run_attempt }}
+
       - name: Validate bounded output
+        if: steps.budget.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
           test -s AGENT_TRIAL.md || { echo "::error::Agent produced no AGENT_TRIAL.md"; exit 1; }
           bytes="$(wc -c < AGENT_TRIAL.md | tr -d '[:space:]')"
           test "$bytes" -le 12000 || { echo "::error::Agent output exceeds 12000 bytes"; exit 1; }
-          changed="$(git status --porcelain --untracked-files=all)"
+          changed="$(git status --porcelain --untracked-files=all -- . ':!.agent-budget' ':!budget-plan.json' ':!budget-record.json')"
           test "$changed" = "?? AGENT_TRIAL.md" || {
             echo "::error::Unexpected changed-file set: $changed"
             exit 1
@@ -107,6 +188,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload review artifact
+        if: steps.budget.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: copilot-bounded-agent-trial
