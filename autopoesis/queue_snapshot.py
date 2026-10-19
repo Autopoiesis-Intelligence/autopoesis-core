@@ -106,3 +106,105 @@ def validate_queue_snapshot(
         "task_queue_sha256": actual_digest,
         "task_queue_size_bytes": len(snapshot),
     }
+
+
+def validate_restore_source_run(
+    run: Any,
+    *,
+    requested_run_id: str | int,
+    expected_repository: str,
+    expected_workflow_path: str = ".github/workflows/ci.yml",
+) -> dict[str, Any]:
+    """Validate the GitHub run metadata before trusting its artifact list."""
+    if not isinstance(run, dict):
+        raise ValueError("Source run metadata must be a JSON object")
+    expected_id = _run_id_text(requested_run_id)
+    if str(run.get("id", "")) != expected_id:
+        raise ValueError("Source run ID does not match restore_run_id")
+    if run.get("conclusion") != "success":
+        raise ValueError(
+            f"Source run must have conclusion=success; got {run.get('conclusion')!r}"
+        )
+    if run.get("event") != "workflow_dispatch":
+        raise ValueError(
+            "Source run must be an explicit workflow_dispatch seed run; "
+            f"got {run.get('event')!r}"
+        )
+    path = run.get("path")
+    workflow_path = path.split("@", 1)[0] if isinstance(path, str) else ""
+    if workflow_path != expected_workflow_path:
+        raise ValueError(
+            f"Source run must use {expected_workflow_path}; got {path!r}"
+        )
+    repository_data = run.get("repository")
+    repository = (
+        repository_data.get("full_name")
+        if isinstance(repository_data, dict)
+        else None
+    )
+    if repository != expected_repository:
+        raise ValueError("Source run belongs to a different repository")
+    source_sha = run.get("head_sha")
+    if not isinstance(source_sha, str) or not _GIT_SHA.fullmatch(source_sha):
+        raise ValueError(
+            "Source run does not expose a valid 40-character hexadecimal head SHA"
+        )
+    return {
+        "source_run_id": run["id"],
+        "source_run_url": run.get("html_url"),
+        "source_repository": repository,
+        "source_workflow_path": workflow_path,
+        "source_head_sha": source_sha.lower(),
+        "source_conclusion": run["conclusion"],
+    }
+
+
+def bind_source_artifact(
+    provenance: dict[str, Any],
+    artifacts_payload: Any,
+    *,
+    requested_run_id: str | int,
+    expected_artifact_name: str = "autopoesis-core-results",
+) -> dict[str, Any]:
+    """Require one unexpired artifact whose run ID and SHA match provenance."""
+    if not isinstance(provenance, dict):
+        raise ValueError("Verified source provenance must be a JSON object")
+    if not isinstance(artifacts_payload, dict):
+        raise ValueError("Source artifacts response must be a JSON object")
+    artifacts = artifacts_payload.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise ValueError("Source artifacts response must contain an artifacts array")
+
+    expected_id = _run_id_text(requested_run_id)
+    matches = [
+        artifact for artifact in artifacts
+        if isinstance(artifact, dict)
+        and artifact.get("name") == expected_artifact_name
+        and not artifact.get("expired", True)
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"Source run must contain exactly one unexpired {expected_artifact_name} artifact"
+        )
+    artifact = matches[0]
+    artifact_run = artifact.get("workflow_run")
+    if not isinstance(artifact_run, dict) or str(artifact_run.get("id", "")) != expected_id:
+        raise ValueError("Source artifact is not bound to the requested run")
+    if artifact_run.get("head_sha") != provenance.get("source_head_sha"):
+        raise ValueError("Source artifact head SHA does not match source run")
+
+    digest = artifact.get("digest")
+    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise ValueError("Source artifact does not expose a valid SHA-256 archive digest")
+    size = artifact.get("size_in_bytes")
+    if type(size) is not int or size < 0:
+        raise ValueError("Source artifact does not expose a valid size")
+
+    return {
+        **provenance,
+        "source_artifact_id": artifact.get("id"),
+        "source_artifact_name": artifact.get("name"),
+        "source_artifact_digest": digest,
+        "source_artifact_size_bytes": size,
+        "source_artifact_created_at": artifact.get("created_at"),
+    }

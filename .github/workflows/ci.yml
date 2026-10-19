@@ -49,44 +49,18 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import subprocess
           from pathlib import Path
+          from autopoesis.queue_snapshot import bind_source_artifact, validate_restore_source_run
 
-          run = json.loads(Path(".restore-run.json").read_text(encoding="utf-8"))
           requested_run_id = os.environ["RESTORE_RUN_ID"]
-          if str(run.get("id", "")) != requested_run_id:
-              raise SystemExit("Source run ID does not match restore_run_id")
-          if run.get("conclusion") != "success":
-              raise SystemExit(
-                  f"Source run must have conclusion=success; got {run.get('conclusion')!r}"
-              )
-          if run.get("event") != "workflow_dispatch":
-              raise SystemExit(
-                  f"Source run must be an explicit workflow_dispatch seed run; got {run.get('event')!r}"
-              )
-          workflow_path = str(run.get("path", "")).split("@", 1)[0]
-          if workflow_path != ".github/workflows/ci.yml":
-              raise SystemExit(
-                  f"Source run must use .github/workflows/ci.yml; got {run.get('path')!r}"
-              )
-          repository = run.get("repository", {}).get("full_name")
-          if repository != os.environ["GITHUB_REPOSITORY"]:
-              raise SystemExit("Source run belongs to a different repository")
-          source_sha = run.get("head_sha")
-          if (
-              not isinstance(source_sha, str)
-              or len(source_sha) != 40
-              or any(char not in "0123456789abcdefABCDEF" for char in source_sha)
-          ):
-              raise SystemExit("Source run does not expose a valid 40-character hexadecimal head SHA")
-          provenance = {
-              "source_run_id": run.get("id"),
-              "source_run_url": run.get("html_url"),
-              "source_repository": repository,
-              "source_workflow_path": workflow_path,
-              "source_head_sha": source_sha,
-              "source_conclusion": run.get("conclusion"),
-          }
-          artifacts_response = __import__("subprocess").run(
+          run = json.loads(Path(".restore-run.json").read_text(encoding="utf-8"))
+          provenance = validate_restore_source_run(
+              run,
+              requested_run_id=requested_run_id,
+              expected_repository=os.environ["GITHUB_REPOSITORY"],
+          )
+          artifacts_response = subprocess.run(
               [
                   "gh", "api",
                   f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{requested_run_id}/artifacts",
@@ -94,32 +68,11 @@ jobs:
               check=True, capture_output=True, text=True,
           )
           artifacts_payload = json.loads(artifacts_response.stdout)
-          matches = [
-              artifact for artifact in artifacts_payload.get("artifacts", [])
-              if artifact.get("name") == "autopoesis-core-results"
-              and not artifact.get("expired", True)
-          ]
-          if len(matches) != 1:
-              raise SystemExit(
-                  "Source run must contain exactly one unexpired "
-                  "autopoesis-core-results artifact"
-              )
-          artifact = matches[0]
-          artifact_run = artifact.get("workflow_run") or {}
-          if str(artifact_run.get("id", "")) != requested_run_id:
-              raise SystemExit("Source artifact is not bound to the requested run")
-          if artifact_run.get("head_sha") != source_sha:
-              raise SystemExit("Source artifact head SHA does not match source run")
-          digest = artifact.get("digest")
-          if not isinstance(digest, str) or not digest.startswith("sha256:"):
-              raise SystemExit("Source artifact does not expose a SHA-256 archive digest")
-          provenance.update({
-              "source_artifact_id": artifact.get("id"),
-              "source_artifact_name": artifact.get("name"),
-              "source_artifact_digest": digest,
-              "source_artifact_size_bytes": artifact.get("size_in_bytes"),
-              "source_artifact_created_at": artifact.get("created_at"),
-          })
+          provenance = bind_source_artifact(
+              provenance,
+              artifacts_payload,
+              requested_run_id=requested_run_id,
+          )
           Path("QUEUE_RESTORE_PROVENANCE.json").write_text(
               json.dumps(provenance, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",

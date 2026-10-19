@@ -6,7 +6,12 @@ import unittest
 from pathlib import Path
 
 from autopoesis.core import EvolutionError
-from autopoesis.queue_snapshot import create_queue_snapshot_manifest, validate_queue_snapshot
+from autopoesis.queue_snapshot import (
+    bind_source_artifact,
+    create_queue_snapshot_manifest,
+    validate_queue_snapshot,
+    validate_restore_source_run,
+)
 from autopoesis.task_queue import load_queue, update_queue_file
 from run_tasks import run
 
@@ -205,6 +210,115 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             manifest_path.unlink()
             with self.assertRaisesRegex(ValueError, "manifest file is missing"):
                 validate_queue_snapshot(snapshot, manifest_path, **expected)
+
+
+    def _valid_source_run(self):
+        return {
+            "id": 12345,
+            "conclusion": "success",
+            "event": "workflow_dispatch",
+            "path": ".github/workflows/ci.yml@refs/heads/main",
+            "repository": {
+                "full_name": "Autopoiesis-Intelligence/autopoesis-core",
+            },
+            "head_sha": "a" * 40,
+            "html_url": "https://github.com/Autopoiesis-Intelligence/autopoesis-core/actions/runs/12345",
+        }
+
+    def test_source_run_validation_accepts_expected_seed_run(self):
+        provenance = validate_restore_source_run(
+            self._valid_source_run(),
+            requested_run_id=12345,
+            expected_repository="Autopoiesis-Intelligence/autopoesis-core",
+        )
+
+        self.assertEqual(provenance["source_run_id"], 12345)
+        self.assertEqual(provenance["source_head_sha"], "a" * 40)
+        self.assertEqual(provenance["source_workflow_path"], ".github/workflows/ci.yml")
+        self.assertEqual(provenance["source_conclusion"], "success")
+
+    def test_source_run_validation_rejects_wrong_identity_status_event_workflow_or_repo(self):
+        valid = self._valid_source_run()
+        cases = (
+            ("wrong run ID", {**valid, "id": 54321}, "ID"),
+            ("failed source", {**valid, "conclusion": "failure"}, "conclusion=success"),
+            ("wrong event", {**valid, "event": "pull_request"}, "workflow_dispatch"),
+            ("wrong workflow", {**valid, "path": ".github/workflows/other.yml@refs/heads/main"}, "must use"),
+            (
+                "wrong repository",
+                {**valid, "repository": {"full_name": "someone/else"}},
+                "different repository",
+            ),
+            ("invalid commit SHA", {**valid, "head_sha": "not-a-sha"}, "valid 40-character"),
+        )
+
+        for label, run, message in cases:
+            with self.subTest(case=label), self.assertRaisesRegex(ValueError, message):
+                validate_restore_source_run(
+                    run,
+                    requested_run_id=12345,
+                    expected_repository="Autopoiesis-Intelligence/autopoesis-core",
+                )
+
+    def test_source_artifact_validation_accepts_exact_run_binding(self):
+        source = validate_restore_source_run(
+            self._valid_source_run(),
+            requested_run_id=12345,
+            expected_repository="Autopoiesis-Intelligence/autopoesis-core",
+        )
+        artifact = {
+            "id": 67890,
+            "name": "autopoesis-core-results",
+            "expired": False,
+            "workflow_run": {"id": 12345, "head_sha": "a" * 40},
+            "digest": "sha256:" + "b" * 64,
+            "size_in_bytes": 4096,
+            "created_at": "2026-10-19T08:00:00Z",
+        }
+
+        bound = bind_source_artifact(
+            source,
+            {"artifacts": [artifact]},
+            requested_run_id=12345,
+        )
+
+        self.assertEqual(bound["source_artifact_id"], 67890)
+        self.assertEqual(bound["source_artifact_digest"], artifact["digest"])
+        self.assertEqual(bound["source_artifact_size_bytes"], 4096)
+
+    def test_source_artifact_validation_rejects_missing_duplicate_or_unbound_artifacts(self):
+        source = validate_restore_source_run(
+            self._valid_source_run(),
+            requested_run_id=12345,
+            expected_repository="Autopoiesis-Intelligence/autopoesis-core",
+        )
+        artifact = {
+            "id": 67890,
+            "name": "autopoesis-core-results",
+            "expired": False,
+            "workflow_run": {"id": 12345, "head_sha": "a" * 40},
+            "digest": "sha256:" + "b" * 64,
+            "size_in_bytes": 4096,
+        }
+        cases = (
+            ({"artifacts": []}, "exactly one"),
+            ({"artifacts": [{**artifact, "expired": True}]}, "exactly one"),
+            ({"artifacts": [artifact, artifact]}, "exactly one"),
+            (
+                {"artifacts": [{**artifact, "workflow_run": {"id": 999, "head_sha": "a" * 40}}]},
+                "not bound",
+            ),
+            (
+                {"artifacts": [{**artifact, "workflow_run": {"id": 12345, "head_sha": "c" * 40}}]},
+                "head SHA",
+            ),
+            ({"artifacts": [{**artifact, "digest": "sha256:invalid"}]}, "valid SHA-256"),
+            ({"artifacts": [{**artifact, "size_in_bytes": "4096"}]}, "valid size"),
+        )
+
+        for payload, message in cases:
+            with self.subTest(payload=payload), self.assertRaisesRegex(ValueError, message):
+                bind_source_artifact(source, payload, requested_run_id=12345)
 
 
 if __name__ == "__main__":
