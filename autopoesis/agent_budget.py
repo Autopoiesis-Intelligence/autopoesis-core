@@ -56,15 +56,19 @@ _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 
 @dataclass(frozen=True)
 class BudgetPolicy:
-    max_credits_per_run: float = 10.0
+    # Copilot CLI rejects --max-ai-credits below 30 (observed in Actions run 39336907440).
+    min_credits_per_run: float = 30.0
+    max_credits_per_run: float = 60.0
     owner_reserve_fraction: float = 0.2
     probe_runs_per_day: int = 2
     configured_allowance: float | None = None
     max_backoff_hours: int = 24
 
     def __post_init__(self) -> None:
-        if not _is_amount(self.max_credits_per_run) or self.max_credits_per_run < 1:
-            raise EvolutionError("max_credits_per_run must be a finite number of at least 1")
+        if not _is_amount(self.min_credits_per_run) or self.min_credits_per_run < 1:
+            raise EvolutionError("min_credits_per_run must be a finite number of at least 1")
+        if not _is_amount(self.max_credits_per_run) or self.max_credits_per_run < self.min_credits_per_run:
+            raise EvolutionError("max_credits_per_run must be finite and not below min_credits_per_run")
         if not _is_amount(self.owner_reserve_fraction) or self.owner_reserve_fraction >= 1:
             raise EvolutionError("owner_reserve_fraction must be in [0, 1)")
         if not _is_count(self.probe_runs_per_day):
@@ -245,7 +249,8 @@ def plan(ledger: dict[str, Any], now: datetime, kind: str, policy: BudgetPolicy)
     current = roll_period(ledger, now, policy)
     estimate = estimate_cost(current, kind)
     # A kind with no history may run with whatever is left today; its cap bounds the cost.
-    needed = 1.0 if estimate is None else max(estimate, 1.0)
+    # No run fits below the agent's own minimum cap.
+    needed = max(estimate or 0.0, policy.min_credits_per_run)
     decision: dict[str, Any] = {
         "kind": kind,
         "period": current["period"],
@@ -381,7 +386,7 @@ def _is_count(value: Any) -> bool:
 
 
 def _cap(value: float) -> int:
-    return max(int(math.floor(value)), 1)
+    return int(math.floor(value))
 
 
 def _parse_time(value: Any) -> datetime:
@@ -423,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kind", required=True)
     parser.add_argument("--now", help="ISO-8601 time with timezone; defaults to the current UTC time")
     parser.add_argument("--allowance", type=float, help="known monthly AI credit allowance, if the owner set one")
+    parser.add_argument("--min-credits-per-run", type=float, default=BudgetPolicy.min_credits_per_run)
     parser.add_argument("--max-credits-per-run", type=float, default=BudgetPolicy.max_credits_per_run)
     parser.add_argument("--task-id")
     parser.add_argument("--cap", type=float)
@@ -433,6 +439,7 @@ def main(argv: list[str] | None = None) -> int:
 
     now = _parse_time(args.now) if args.now else datetime.now(timezone.utc)
     policy = BudgetPolicy(
+        min_credits_per_run=args.min_credits_per_run,
         max_credits_per_run=args.max_credits_per_run,
         configured_allowance=args.allowance,
     )
