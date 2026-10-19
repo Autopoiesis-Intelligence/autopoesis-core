@@ -34,6 +34,12 @@ def _validate_history(history: list[Any]) -> None:
         timestamp = event.get("at")
         if not isinstance(timestamp, str) or not timestamp.strip():
             raise EvolutionError(f"{prefix}: at must be a non-empty string")
+        try:
+            parsed_timestamp = datetime.fromisoformat(timestamp)
+        except ValueError as exc:
+            raise EvolutionError(f"{prefix}: at must be an ISO 8601 timestamp") from exc
+        if parsed_timestamp.tzinfo is None or parsed_timestamp.utcoffset() is None:
+            raise EvolutionError(f"{prefix}: at must include a timezone offset")
         if event_type == "STATUS_CHANGED":
             if not isinstance(event.get("from"), str) or event.get("from") not in QUEUE_STATUSES:
                 raise EvolutionError(f"{prefix}: invalid source status")
