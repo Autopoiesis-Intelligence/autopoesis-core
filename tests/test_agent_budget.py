@@ -99,23 +99,23 @@ class UnknownAllowanceTests(unittest.TestCase):
 
 
 class KnownAllowanceTests(unittest.TestCase):
-    def test_spending_is_paced_over_remaining_days_with_owner_reserve(self):
-        policy = BudgetPolicy(configured_allowance=1100, owner_reserve_fraction=0.2, max_credits_per_run=60)
+    def test_spending_is_paced_over_remaining_days(self):
+        policy = BudgetPolicy(configured_allowance=880, max_credits_per_run=60)
         ledger = new_ledger(OCT_10, policy)
         decision = plan(ledger, OCT_10, "docs", policy)
-        # 22 days left including today; 880 usable credits -> 40 per day.
+        # 22 days left including today; 880 credits -> 40 per day.
         self.assertEqual(decision["daily_budget"], 40.0)
         self.assertEqual(decision["max_ai_credits"], 40)
 
     def test_daily_budget_below_the_agent_minimum_waits(self):
-        policy = BudgetPolicy(configured_allowance=220, owner_reserve_fraction=0.2)
+        policy = BudgetPolicy(configured_allowance=176)
         decision = plan(new_ledger(OCT_10, policy), OCT_10, "docs", policy)
         self.assertEqual(decision["daily_budget"], 8.0)
         self.assertEqual(decision["decision"], "WAIT")
         self.assertEqual(decision["reason"], "DAILY_BUDGET_USED")
 
     def test_learned_cost_decides_whether_a_run_fits_today(self):
-        policy = BudgetPolicy(configured_allowance=2750, owner_reserve_fraction=0.2)
+        policy = BudgetPolicy(configured_allowance=2200)
         ledger = record(new_ledger(OCT_10, policy), OCT_10, policy, cap=60, usage={"aiCredits": 60})
         decision = plan(ledger, OCT_10, "docs", policy)
         # 100 per day; 60 spent leaves 40, less than the learned cost of 60.
@@ -124,8 +124,8 @@ class KnownAllowanceTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "DAILY_BUDGET_USED")
         self.assertEqual(plan(ledger, OCT_10 + timedelta(days=1), "docs", policy)["decision"], "RUN")
 
-    def test_monthly_budget_stops_at_the_reserve(self):
-        policy = BudgetPolicy(configured_allowance=100, owner_reserve_fraction=0.2)
+    def test_monthly_budget_stops_when_less_than_a_minimum_run_is_left(self):
+        policy = BudgetPolicy(configured_allowance=80)
         last_day = datetime(2026, 10, 31, 8, 0, tzinfo=timezone.utc)
         ledger = record(new_ledger(last_day, policy), last_day, policy, usage={"aiCredits": 75})
         decision = plan(ledger, last_day, "docs", policy)
@@ -159,7 +159,7 @@ class ChargingTests(unittest.TestCase):
     def test_invalid_policy_is_rejected(self):
         for kwargs in ({"max_credits_per_run": 20}, {"max_credits_per_run": float("nan")},
                        {"min_credits_per_run": 0.5},
-                       {"owner_reserve_fraction": 1.0}, {"probe_runs_per_day": -1},
+                       {"probe_runs_per_day": -1},
                        {"configured_allowance": -5}, {"max_backoff_hours": 0}):
             with self.assertRaises(EvolutionError, msg=kwargs):
                 BudgetPolicy(**kwargs)

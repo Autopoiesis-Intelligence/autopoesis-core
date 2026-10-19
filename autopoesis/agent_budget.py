@@ -12,8 +12,8 @@ core does not assume one. It learns from its own runs:
   each new month raises it by a quarter until the next exhaustion corrects it;
 - a rate-limit error blocks runs with exponential backoff.
 
-Spending is paced evenly over the days left in the month, and a reserve is
-kept for the owner's own use once the allowance is known. Nothing here calls
+Spending is paced evenly over the days left in the month. The whole
+allowance is the core's: the Copilot account serves no other user. Nothing here calls
 the agent: callers ask ``plan`` before a run and report it with ``record``.
 """
 
@@ -59,7 +59,6 @@ class BudgetPolicy:
     # Copilot CLI rejects --max-ai-credits below 30 (observed in Actions run 39336907440).
     min_credits_per_run: float = 30.0
     max_credits_per_run: float = 60.0
-    owner_reserve_fraction: float = 0.2
     probe_runs_per_day: int = 2
     configured_allowance: float | None = None
     max_backoff_hours: int = 24
@@ -69,8 +68,6 @@ class BudgetPolicy:
             raise EvolutionError("min_credits_per_run must be a finite number of at least 1")
         if not _is_amount(self.max_credits_per_run) or self.max_credits_per_run < self.min_credits_per_run:
             raise EvolutionError("max_credits_per_run must be finite and not below min_credits_per_run")
-        if not _is_amount(self.owner_reserve_fraction) or self.owner_reserve_fraction >= 1:
-            raise EvolutionError("owner_reserve_fraction must be in [0, 1)")
         if not _is_count(self.probe_runs_per_day):
             raise EvolutionError("probe_runs_per_day must be a non-negative integer")
         if self.configured_allowance is not None and not _is_amount(self.configured_allowance):
@@ -275,7 +272,8 @@ def plan(ledger: dict[str, Any], now: datetime, kind: str, policy: BudgetPolicy)
         return {**decision, "decision": "RUN", "reason": "PROBING_UNKNOWN_ALLOWANCE",
                 "max_ai_credits": _cap(policy.max_credits_per_run)}
 
-    usable = current["allowance"] * (1 - policy.owner_reserve_fraction)
+    # The whole allowance belongs to the core: nobody else uses this Copilot account.
+    usable = current["allowance"]
     spent_before_today = current["used"] - spent_today
     daily_budget = max(usable - spent_before_today, 0.0) / days_left_in_month(now)
     left_today = min(daily_budget - spent_today, usable - current["used"])
