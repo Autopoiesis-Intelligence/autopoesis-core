@@ -79,8 +79,9 @@ jobs:
           )
           print(
               f"Verified source run {provenance['source_run_id']} "
-              f"at SHA {source_sha}; artifact {artifact.get('id')} "
-              f"with archive digest {digest}."
+              f"at SHA {provenance['source_head_sha']}; "
+              f"artifact {provenance['source_artifact_id']} "
+              f"with archive digest {provenance['source_artifact_digest']}."
           )
           PY
       - name: Download prior queue snapshot
