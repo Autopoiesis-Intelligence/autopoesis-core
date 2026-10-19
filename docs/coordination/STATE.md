@@ -12,9 +12,13 @@ Status: bootstrap template. **Refresh from live GitHub before relying on any val
 - Active task ID: NONE VERIFIED
 - Active branch/PR: NONE VERIFIED
 - Current CI conclusion on current main SHA: NOT YET VERIFIED
-- Coordination protocol: proposed; see the PR that introduces `docs/coordination/`
+- Coordination protocol: proposed in [PR #21](https://github.com/Autopoiesis-Intelligence/autopoiesis-core/pull/21); not active until merged
 - Agent instructions: PR #19 exists; not assumed merged
 - Queue concurrency fix: PR #20 exists; not assumed merged
+
+## Live handoff
+
+Use [issue #22](https://github.com/Autopoiesis-Intelligence/autopoiesis-core/issues/22) for the current task claim, ownership, blockers, and meaningful handoffs. Re-fetch its latest comments; do not assume this snapshot is current.
 
 ## Active task claim
 
