@@ -6,9 +6,16 @@ import json
 import os
 import stat
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX platforms
+    fcntl = None
 
 from .core import EvolutionError, canonical_json
 
@@ -41,6 +48,39 @@ def _write_queue_atomically(path: Path, queue: dict[str, Any]) -> None:
         os.replace(temporary_path, path)
     finally:
         temporary_path.unlink(missing_ok=True)
+
+
+@contextmanager
+def queue_write_lock(path: Path) -> Iterator[None]:
+    """Hold an exclusive, non-blocking lock for one load-modify-write cycle.
+
+    Atomic replacement alone prevents torn files but not lost updates: two
+    writers that load the same snapshot would both succeed and the second
+    would silently discard the first. A concurrent writer is rejected
+    instead of waiting, so a caller never reports success for an update
+    that another writer overwrote. The lock is not reentrant: do not nest
+    helpers that take it, even in the same process.
+    """
+    if fcntl is None:
+        raise EvolutionError("Task queue locking is not supported on this platform")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(f".{path.name}.lock")
+    descriptor = os.open(
+        lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise EvolutionError(
+                f"Task queue {path.as_posix()} is locked by another writer"
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 def empty_queue() -> dict[str, Any]:
@@ -250,32 +290,35 @@ def record_verification_file(
     ):
         raise EvolutionError("artifact_sha256 must be a lowercase SHA-256 hex digest")
 
-    queue = load_queue(path)
-    event = {
-        "event": "VERIFICATION_RECORDED",
-        "task_id": task_id,
-        "verification_status": verification_status,
-        "verification_level": verification_level,
-        "artifact_sha256": artifact_sha256,
-        "at": datetime.now(timezone.utc).isoformat(),
-    }
-    updated = json.loads(canonical_json(queue))
-    updated["history"].append(event)
-    _write_queue_atomically(path, updated)
+    with queue_write_lock(path):
+        queue = load_queue(path)
+        event = {
+            "event": "VERIFICATION_RECORDED",
+            "task_id": task_id,
+            "verification_status": verification_status,
+            "verification_level": verification_level,
+            "artifact_sha256": artifact_sha256,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+        updated = json.loads(canonical_json(queue))
+        updated["history"].append(event)
+        _write_queue_atomically(path, updated)
     return {"task_id": task_id, "verification_status": verification_status, "path": path.as_posix()}
 
 
 def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str, Any]:
     """Merge discovered candidates into a local persistent JSON queue."""
-    current = load_queue(path)
-    result = merge_candidates(current, candidates)
-    _write_queue_atomically(path, result["queue"])
+    with queue_write_lock(path):
+        current = load_queue(path)
+        result = merge_candidates(current, candidates)
+        _write_queue_atomically(path, result["queue"])
     return {"added": result["added"], "total": result["total"], "path": path.as_posix()}
 
 
 def record_outcome_file(path: Path, task_id: str, status: str, note: str = "") -> dict[str, Any]:
     """Persist a status transition and its audit event to the queue file."""
-    queue = load_queue(path)
-    updated = record_outcome(queue, task_id, status, note)
-    _write_queue_atomically(path, updated)
+    with queue_write_lock(path):
+        queue = load_queue(path)
+        updated = record_outcome(queue, task_id, status, note)
+        _write_queue_atomically(path, updated)
     return {"task_id": task_id, "status": status, "path": path.as_posix()}
