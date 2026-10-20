@@ -191,6 +191,24 @@ class CommandLineTests(unittest.TestCase):
                              check=True, capture_output=True, text=True).stdout
         self.assertEqual(json.loads(out)["claims"]["CL-009"]["status"], "RELEASED")
 
+    def run_stdin(self, text):
+        return subprocess.run([sys.executable, "-m", "autopoesis.coordination", "-"], input=text,
+                              capture_output=True, text=True)
+
+    def test_missing_or_broken_input_means_unknown_claims_not_empty(self):
+        # What the pipe delivers when gh fails: nothing, a partial page, or an error object.
+        for text in ("", "[[{", '{"message": "Bad credentials"}', "null"):
+            with self.subTest(text=text):
+                result = self.run_stdin(text)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("claims unknown", result.stderr)
+
+    def test_an_issue_without_comments_is_a_valid_empty_state(self):
+        result = self.run_stdin("[[]]")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), {"claims": {}, "decisions": []})
+
     def test_command_line_without_input_fails(self):
         result = subprocess.run([sys.executable, "-m", "autopoesis.coordination"], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)

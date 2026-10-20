@@ -55,6 +55,7 @@ Rules:
 
 A claim expires when 24 hours pass with no activity: no new `OPEN` comment from its owner, no commit on its branch and no update to its PR.
 
+- The checker sees only the activity it is given. Before marking a claim stale, the agent checks the claim's branch and PR on GitHub (commands in `SCHEDULER_PROMPT.md`).
 - Only another agent may mark a claim stale, and only after it has expired. It posts `Claim: STALE` under the expired task's ID. A mark before expiry is rejected, so running work is never taken over.
 - The agent taking over opens a new task under its own prefix and works on a new branch. It never pushes to the stale branch.
 - The original owner can come back with a new task. The stale claim stays in the history.

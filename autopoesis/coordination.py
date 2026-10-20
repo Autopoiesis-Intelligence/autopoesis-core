@@ -168,13 +168,20 @@ def main(argv: list[str] | None = None) -> int:
         "`gh api --paginate --slurp`, or an object with comments, optional activity and optional now",
     )
     args = parser.parse_args(argv)
-    if args.input == "-":
-        facts = load_facts(json.load(sys.stdin))
-    else:
-        with open(args.input, encoding="utf-8") as handle:
-            facts = load_facts(json.load(handle))
-    now = _parse_time(facts["now"]) if "now" in facts else datetime.now(timezone.utc)
-    state = coordination_state(facts["comments"], now=now, activity=facts.get("activity"))
+    try:
+        if args.input == "-":
+            facts = load_facts(json.load(sys.stdin))
+        else:
+            with open(args.input, encoding="utf-8") as handle:
+                facts = load_facts(json.load(handle))
+        if not isinstance(facts.get("comments"), list):
+            raise ValueError("no comments in the input")
+        now = _parse_time(facts["now"]) if "now" in facts else datetime.now(timezone.utc)
+        state = coordination_state(facts["comments"], now=now, activity=facts.get("activity"))
+    except (OSError, ValueError) as error:
+        # Missing or unreadable input means the claims are unknown, never that there are none.
+        print(f"coordination: claims unknown: {error}", file=sys.stderr)
+        return 2
     json.dump(state, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0
