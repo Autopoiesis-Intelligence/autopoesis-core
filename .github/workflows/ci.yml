@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       restore_run_id:
-        description: "Digits only: run ID of a prior successful workflow run that contains the seeded DONE and verification probes. Leave blank for the seed run."
+        description: "Run ID (digits only) of the latest successful snapshot run on this branch, or 'latest' to select it automatically. Leave blank for the seed run."
         required: false
         type: string
         default: ""
@@ -36,15 +36,22 @@ jobs:
         with:
           python-version: "3.12"
       - name: Verify prior run succeeded
+        id: source
         if: ${{ inputs.restore_run_id != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           RESTORE_RUN_ID: ${{ inputs.restore_run_id }}
         run: |
-          if [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
-            echo "Invalid restore_run_id: enter only the numeric ID of a prior successful seed run (digits only), not the field name or a URL. Leave blank when creating the seed run." >&2
+          if [[ "$RESTORE_RUN_ID" == "latest" ]]; then
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&status=success&branch=${GITHUB_REF_NAME}&per_page=100" > .restore-candidates.json
+            RESTORE_RUN_ID=$(python -c 'import json, os; from autopoesis.queue_snapshot import latest_source_run_id; print(latest_source_run_id(json.load(open(".restore-candidates.json")), current_run_id=os.environ["GITHUB_RUN_ID"], current_branch=os.environ["GITHUB_REF_NAME"]))')
+            echo "Selected latest snapshot run ${RESTORE_RUN_ID} on branch ${GITHUB_REF_NAME}."
+          elif [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "Invalid restore_run_id: enter the numeric ID of the latest successful snapshot run (digits only) or 'latest', not the field name or a URL. Leave blank when creating the seed run." >&2
             exit 1
           fi
+          export RESTORE_RUN_ID
+          echo "run_id=${RESTORE_RUN_ID}" >> "$GITHUB_OUTPUT"
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESTORE_RUN_ID}" > .restore-run.json
           python - <<'PY'
           import json
@@ -109,7 +116,7 @@ jobs:
           name: autopoesis-core-results
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.restore_run_id }}
+          run-id: ${{ steps.source.outputs.run_id }}
           path: .queue-restore
       - name: Validate and install prior queue snapshot
         if: ${{ inputs.restore_run_id != '' }}
@@ -220,6 +227,12 @@ jobs:
               ]
               if not matching_history:
                   raise SystemExit("Restored DONE probe has no DONE transition in history")
+              probe_items = [item for item in queue["items"] if item.get("id") == "CI-RESTORE-DONE-PROBE"]
+              if len(probe_items) != 1 or len(matching_history) != 1:
+                  raise SystemExit(
+                      "Restored DONE probe was duplicated: "
+                      f"{len(probe_items)} items, {len(matching_history)} DONE transitions"
+                  )
               print("Synthetic DONE probe and its status history survived cross-run restore.")
 
           verification = next(

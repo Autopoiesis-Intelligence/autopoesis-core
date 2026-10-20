@@ -9,6 +9,7 @@ from autopoesis.core import EvolutionError
 from autopoesis.queue_snapshot import (
     bind_source_artifact,
     create_queue_snapshot_manifest,
+    latest_source_run_id,
     require_latest_source_run,
     validate_queue_snapshot,
     validate_restore_source_run,
@@ -394,6 +395,25 @@ class QueueSnapshotValidationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "not the latest snapshot.*latest is 200"):
             self._latest_check(300, runs)
+
+    def test_automatic_selection_picks_newest_eligible_run_and_skips_the_current_one(self):
+        runs = [
+            self._dispatch_run(500),
+            self._dispatch_run(450, conclusion="failure"),
+            self._dispatch_run(300),
+            self._dispatch_run(200),
+        ]
+
+        self.assertEqual(
+            latest_source_run_id({"workflow_runs": runs}, current_run_id=500, current_branch="main"),
+            300,
+        )
+
+    def test_automatic_selection_fails_closed_without_an_eligible_run(self):
+        runs = [self._dispatch_run(500), self._dispatch_run(300, head_branch="other")]
+
+        with self.assertRaisesRegex(ValueError, "No successful workflow_dispatch"):
+            latest_source_run_id({"workflow_runs": runs}, current_run_id=500, current_branch="main")
 
     def test_latest_check_fails_closed_on_missing_or_malformed_run_list(self):
         cases = (

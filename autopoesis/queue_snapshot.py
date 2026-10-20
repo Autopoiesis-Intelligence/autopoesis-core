@@ -210,17 +210,14 @@ def bind_source_artifact(
     }
 
 
-def require_latest_source_run(
-    provenance: dict[str, Any],
+def latest_source_run_id(
     runs_payload: Any,
     *,
     current_run_id: str | int,
     current_branch: str,
     expected_workflow_path: str = ".github/workflows/ci.yml",
-) -> dict[str, Any]:
-    """Reject replay: the source must be the newest successful dispatch run on this branch."""
-    if not isinstance(provenance, dict):
-        raise ValueError("Verified source provenance must be a JSON object")
+) -> int:
+    """Return the newest successful dispatch run of the workflow on this branch."""
     if not isinstance(current_branch, str) or not current_branch:
         raise ValueError("Current branch must be a non-empty string")
     if not isinstance(runs_payload, dict):
@@ -230,7 +227,6 @@ def require_latest_source_run(
         raise ValueError("Workflow runs response must contain a workflow_runs array")
 
     current_id = int(_run_id_text(current_run_id))
-    source_id = int(_run_id_text(provenance.get("source_run_id", "")))
     candidates = []
     for run in runs:
         if not isinstance(run, dict) or type(run.get("id")) is not int:
@@ -250,7 +246,27 @@ def require_latest_source_run(
             f"No successful workflow_dispatch snapshot run found on branch {current_branch!r}"
         )
     # GitHub run IDs increase monotonically, so the largest ID is the newest run.
-    latest_id = max(candidates)
+    return max(candidates)
+
+
+def require_latest_source_run(
+    provenance: dict[str, Any],
+    runs_payload: Any,
+    *,
+    current_run_id: str | int,
+    current_branch: str,
+    expected_workflow_path: str = ".github/workflows/ci.yml",
+) -> dict[str, Any]:
+    """Reject replay: the source must be the newest successful dispatch run on this branch."""
+    if not isinstance(provenance, dict):
+        raise ValueError("Verified source provenance must be a JSON object")
+    source_id = int(_run_id_text(provenance.get("source_run_id", "")))
+    latest_id = latest_source_run_id(
+        runs_payload,
+        current_run_id=current_run_id,
+        current_branch=current_branch,
+        expected_workflow_path=expected_workflow_path,
+    )
     if source_id != latest_id:
         raise ValueError(
             f"Source run {source_id} is not the latest snapshot on branch "
