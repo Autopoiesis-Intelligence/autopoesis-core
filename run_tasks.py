@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from autopoesis.task_queue import record_outcome_file, update_queue_file
-from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact
+from autopoesis.task_queue import record_outcome_file, record_verification_file, update_queue_file
+from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, verify_test_patch_in_sandbox
 
 
 ROOT = Path(__file__).resolve().parent
@@ -140,6 +140,8 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         result = record_outcome_file(queue_path, target_id, status, note)
     elif task_type == "prepare_test_patch":
         result = prepare_patch_artifact(task, ROOT)
+    elif task_type == "verify_test_patch_sandbox":
+        result = verify_test_patch_in_sandbox(task, ROOT)
     elif task_type == "apply_test_patch_sandbox":
         artifact = prepare_patch_artifact(task, ROOT)
         with tempfile.TemporaryDirectory(prefix="autopoesis-patch-sandbox-") as directory:
@@ -152,7 +154,43 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
     else:
         raise ValueError(f"Unsupported task type: {task_type!r}")
 
-    return {"id": task_id, "type": task_type, "status": "PASS", "result": result}
+    if task_type == "verify_test_patch_sandbox" and result.get("verification_status") in {"PASS", "FAIL"}:
+        record_verification_file(
+            queue_path,
+            task_id,
+            result["verification_status"],
+            "GENERATED_TEST_EXECUTION",
+            result.get("artifact_sha256"),
+        )
+
+    task_status = "FAIL" if result.get("verification_status") == "FAIL" else "PASS"
+    record: dict[str, Any] = {
+        "id": task_id,
+        "type": task_type,
+        "status": task_status,
+        "result": result,
+    }
+    if task_type == "prepare_test_patch":
+        record["verification"] = {
+            "level": "PATCH_ARTIFACT_PREPARED_AND_VALIDATED",
+            "generated_code_executed": False,
+            "tests_executed": False,
+            "meaning": "PASS confirms artifact preparation and static validation only.",
+        }
+    elif task_type == "apply_test_patch_sandbox":
+        record["verification"] = {
+            "level": "PATCH_APPLIED_TO_DISPOSABLE_SANDBOX",
+            "generated_code_executed": False,
+            "tests_executed": False,
+            "repository_modified": False,
+            "meaning": "PASS confirms sandbox application only; generated tests were not run.",
+        }
+    else:
+        record["verification"] = {
+            "level": "TASK_HANDLER_COMPLETED",
+            "meaning": "PASS confirms the task handler returned without an exception; interpret result details for the actual checks performed.",
+        }
+    return record
 
 
 def run(tasks_path: Path, results_path: Path, queue_path: Path = Path("TASK_QUEUE.json")) -> int:
