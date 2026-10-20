@@ -1,0 +1,3 @@
+# Local queue write locks (autopoesis.task_queue.queue_write_lock)
+.*.json.lock
+__pycache__/
