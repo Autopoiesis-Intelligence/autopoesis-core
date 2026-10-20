@@ -350,24 +350,25 @@ def record_run(
     return validate_ledger(updated)
 
 
+# Top-level consumption fields of the Copilot CLI 1.0.100 `--usage-output-file` report,
+# observed in run 39346008076. Which unit the AI-credit allowance counts in is not
+# documented, so the larger reading is charged. Every other field (limits, balances,
+# per-model copies) is ignored.
+PREMIUM_REQUEST_COST_FIELD = "totalPremiumRequestCost"
+NANO_AIU_FIELD = "totalNanoAiu"
+NANO_PER_AIU = 1_000_000_000
+
+
 def reported_credits(usage: Any) -> float | None:
-    """Return the one credit total in a usage report, or None if it is absent or ambiguous."""
-    found: set[float] = set()
-
-    def walk(value: Any) -> None:
-        if isinstance(value, dict):
-            for key, item in value.items():
-                lowered = str(key).lower()
-                if ("credit" in lowered or "premiumrequest" in lowered.replace("_", "")) and _is_amount(item):
-                    found.add(float(item))
-                else:
-                    walk(item)
-        elif isinstance(value, list):
-            for item in value:
-                walk(item)
-
-    walk(usage)
-    return found.pop() if len(found) == 1 else None
+    """Return the credits a usage report says the run consumed, or None if it says nothing usable."""
+    if not isinstance(usage, dict):
+        return None
+    readings = []
+    if _is_amount(usage.get(PREMIUM_REQUEST_COST_FIELD)):
+        readings.append(float(usage[PREMIUM_REQUEST_COST_FIELD]))
+    if _is_amount(usage.get(NANO_AIU_FIELD)):
+        readings.append(usage[NANO_AIU_FIELD] / NANO_PER_AIU)
+    return max(readings) if readings else None
 
 
 def _is_amount(value: Any) -> bool:
