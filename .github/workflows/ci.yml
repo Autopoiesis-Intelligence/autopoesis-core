@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       restore_run_id:
-        description: "Digits only: run ID of a prior successful workflow run that contains the seeded DONE and verification probes. Leave blank for the seed run."
+        description: "Run ID (digits only) of the latest successful snapshot run on this branch, or 'latest' to select it automatically. Leave blank for the seed run."
         required: false
         type: string
         default: ""
@@ -17,6 +17,19 @@ on:
         required: false
         type: boolean
         default: false
+      restore_fault:
+        description: "Negative check only: corrupt the downloaded snapshot before validation. The run must then fail; it fails anyway if the fault is not rejected."
+        required: false
+        type: choice
+        default: none
+        options:
+          - none
+          - tamper_bytes
+          - corrupt_json
+          - bad_version
+          - bad_history
+          - drop_queue
+          - drop_manifest
 
 permissions:
   actions: read
@@ -32,26 +45,42 @@ jobs:
         run: |
           echo "seed_done_probe and restore_run_id are mutually exclusive: seed a source run first, then restore from its numeric run ID in a separate run." >&2
           exit 1
+      - name: Reject a restore fault without a restore
+        if: ${{ inputs.restore_fault != '' && inputs.restore_fault != 'none' && inputs.restore_run_id == '' }}
+        run: |
+          echo "restore_fault needs restore_run_id: it corrupts a downloaded snapshot, so there must be one to download." >&2
+          exit 1
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Verify prior run succeeded
+        id: source
         if: ${{ inputs.restore_run_id != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           RESTORE_RUN_ID: ${{ inputs.restore_run_id }}
         run: |
-          if [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
-            echo "Invalid restore_run_id: enter only the numeric ID of a prior successful seed run (digits only), not the field name or a URL. Leave blank when creating the seed run." >&2
+          if [[ "$RESTORE_RUN_ID" == "latest" ]]; then
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&status=success&branch=${GITHUB_REF_NAME}&per_page=100" > .restore-candidates.json
+            RESTORE_RUN_ID=$(python -c 'import json, os; from autopoesis.queue_snapshot import latest_source_run_id; print(latest_source_run_id(json.load(open(".restore-candidates.json")), current_run_id=os.environ["GITHUB_RUN_ID"], current_branch=os.environ["GITHUB_REF_NAME"]))')
+            echo "Selected latest snapshot run ${RESTORE_RUN_ID} on branch ${GITHUB_REF_NAME}."
+          elif [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "Invalid restore_run_id: enter the numeric ID of the latest successful snapshot run (digits only) or 'latest', not the field name or a URL. Leave blank when creating the seed run." >&2
             exit 1
           fi
+          export RESTORE_RUN_ID
+          echo "run_id=${RESTORE_RUN_ID}" >> "$GITHUB_OUTPUT"
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESTORE_RUN_ID}" > .restore-run.json
           python - <<'PY'
           import json
           import os
           import subprocess
           from pathlib import Path
-          from autopoesis.queue_snapshot import bind_source_artifact, validate_restore_source_run
+          from autopoesis.queue_snapshot import (
+              bind_source_artifact,
+              require_latest_source_run,
+              validate_restore_source_run,
+          )
 
           requested_run_id = os.environ["RESTORE_RUN_ID"]
           run = json.loads(Path(".restore-run.json").read_text(encoding="utf-8"))
@@ -73,6 +102,20 @@ jobs:
               artifacts_payload,
               requested_run_id=requested_run_id,
           )
+          runs_response = subprocess.run(
+              [
+                  "gh", "api",
+                  f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/ci.yml/runs"
+                  f"?event=workflow_dispatch&status=success&branch={os.environ['GITHUB_REF_NAME']}&per_page=100",
+              ],
+              check=True, capture_output=True, text=True,
+          )
+          provenance = require_latest_source_run(
+              provenance,
+              json.loads(runs_response.stdout),
+              current_run_id=os.environ["GITHUB_RUN_ID"],
+              current_branch=os.environ["GITHUB_REF_NAME"],
+          )
           Path("QUEUE_RESTORE_PROVENANCE.json").write_text(
               json.dumps(provenance, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
@@ -91,8 +134,51 @@ jobs:
           name: autopoesis-core-results
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.restore_run_id }}
+          run-id: ${{ steps.source.outputs.run_id }}
           path: .queue-restore
+      - name: Inject restore fault for negative verification
+        if: ${{ inputs.restore_run_id != '' && inputs.restore_fault != '' && inputs.restore_fault != 'none' }}
+        env:
+          RESTORE_FAULT: ${{ inputs.restore_fault }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          fault = os.environ["RESTORE_FAULT"]
+          snapshot = Path(".queue-restore/TASK_QUEUE.json")
+          manifest_path = Path(".queue-restore/QUEUE_SNAPSHOT_MANIFEST.json")
+
+          def rebind(data):
+              # Keep the manifest consistent so the queue loader, not the hash check, must reject it.
+              snapshot.write_bytes(data)
+              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+              manifest["task_queue_sha256"] = hashlib.sha256(data).hexdigest()
+              manifest["task_queue_size_bytes"] = len(data)
+              manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+          if fault == "tamper_bytes":
+              snapshot.write_bytes(snapshot.read_bytes() + b" ")
+          elif fault == "corrupt_json":
+              rebind(b'{"version": 1, "items": [')
+          elif fault == "bad_version":
+              queue = json.loads(snapshot.read_text(encoding="utf-8"))
+              queue["version"] = 2
+              rebind(json.dumps(queue).encode("utf-8"))
+          elif fault == "bad_history":
+              queue = json.loads(snapshot.read_text(encoding="utf-8"))
+              queue["history"].append({"event": "UNKNOWN_EVENT", "task_id": "CI-RESTORE-DONE-PROBE"})
+              rebind(json.dumps(queue).encode("utf-8"))
+          elif fault == "drop_queue":
+              snapshot.unlink()
+          elif fault == "drop_manifest":
+              manifest_path.unlink()
+          else:
+              raise SystemExit(f"Unknown restore_fault {fault!r}")
+          print(f"Injected restore fault {fault!r} into the downloaded snapshot.")
+          PY
       - name: Validate and install prior queue snapshot
         if: ${{ inputs.restore_run_id != '' }}
         run: |
@@ -132,6 +218,11 @@ jobs:
               f"queue SHA-256 {provenance['restored_queue_sha256']}."
           )
           PY
+      - name: Fail if an injected restore fault was not rejected
+        if: ${{ inputs.restore_run_id != '' && inputs.restore_fault != '' && inputs.restore_fault != 'none' }}
+        run: |
+          echo "Injected restore fault '${{ inputs.restore_fault }}' was NOT rejected by snapshot validation." >&2
+          exit 1
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
@@ -202,6 +293,12 @@ jobs:
               ]
               if not matching_history:
                   raise SystemExit("Restored DONE probe has no DONE transition in history")
+              probe_items = [item for item in queue["items"] if item.get("id") == "CI-RESTORE-DONE-PROBE"]
+              if len(probe_items) != 1 or len(matching_history) != 1:
+                  raise SystemExit(
+                      "Restored DONE probe was duplicated: "
+                      f"{len(probe_items)} items, {len(matching_history)} DONE transitions"
+                  )
               print("Synthetic DONE probe and its status history survived cross-run restore.")
 
           verification = next(
