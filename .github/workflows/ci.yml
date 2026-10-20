@@ -17,6 +17,19 @@ on:
         required: false
         type: boolean
         default: false
+      restore_fault:
+        description: "Negative check only: corrupt the downloaded snapshot before validation. The run must then fail; it fails anyway if the fault is not rejected."
+        required: false
+        type: choice
+        default: none
+        options:
+          - none
+          - tamper_bytes
+          - corrupt_json
+          - bad_version
+          - bad_history
+          - drop_queue
+          - drop_manifest
 
 permissions:
   actions: read
@@ -31,6 +44,11 @@ jobs:
         if: ${{ inputs.seed_done_probe && inputs.restore_run_id != '' }}
         run: |
           echo "seed_done_probe and restore_run_id are mutually exclusive: seed a source run first, then restore from its numeric run ID in a separate run." >&2
+          exit 1
+      - name: Reject a restore fault without a restore
+        if: ${{ inputs.restore_fault != '' && inputs.restore_fault != 'none' && inputs.restore_run_id == '' }}
+        run: |
+          echo "restore_fault needs restore_run_id: it corrupts a downloaded snapshot, so there must be one to download." >&2
           exit 1
       - uses: actions/setup-python@v5
         with:
@@ -118,6 +136,49 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ steps.source.outputs.run_id }}
           path: .queue-restore
+      - name: Inject restore fault for negative verification
+        if: ${{ inputs.restore_run_id != '' && inputs.restore_fault != '' && inputs.restore_fault != 'none' }}
+        env:
+          RESTORE_FAULT: ${{ inputs.restore_fault }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          fault = os.environ["RESTORE_FAULT"]
+          snapshot = Path(".queue-restore/TASK_QUEUE.json")
+          manifest_path = Path(".queue-restore/QUEUE_SNAPSHOT_MANIFEST.json")
+
+          def rebind(data):
+              # Keep the manifest consistent so the queue loader, not the hash check, must reject it.
+              snapshot.write_bytes(data)
+              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+              manifest["task_queue_sha256"] = hashlib.sha256(data).hexdigest()
+              manifest["task_queue_size_bytes"] = len(data)
+              manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+          if fault == "tamper_bytes":
+              snapshot.write_bytes(snapshot.read_bytes() + b" ")
+          elif fault == "corrupt_json":
+              rebind(b'{"version": 1, "items": [')
+          elif fault == "bad_version":
+              queue = json.loads(snapshot.read_text(encoding="utf-8"))
+              queue["version"] = 2
+              rebind(json.dumps(queue).encode("utf-8"))
+          elif fault == "bad_history":
+              queue = json.loads(snapshot.read_text(encoding="utf-8"))
+              queue["history"].append({"event": "UNKNOWN_EVENT", "task_id": "CI-RESTORE-DONE-PROBE"})
+              rebind(json.dumps(queue).encode("utf-8"))
+          elif fault == "drop_queue":
+              snapshot.unlink()
+          elif fault == "drop_manifest":
+              manifest_path.unlink()
+          else:
+              raise SystemExit(f"Unknown restore_fault {fault!r}")
+          print(f"Injected restore fault {fault!r} into the downloaded snapshot.")
+          PY
       - name: Validate and install prior queue snapshot
         if: ${{ inputs.restore_run_id != '' }}
         run: |
@@ -157,6 +218,11 @@ jobs:
               f"queue SHA-256 {provenance['restored_queue_sha256']}."
           )
           PY
+      - name: Fail if an injected restore fault was not rejected
+        if: ${{ inputs.restore_run_id != '' && inputs.restore_fault != '' && inputs.restore_fault != 'none' }}
+        run: |
+          echo "Injected restore fault '${{ inputs.restore_fault }}' was NOT rejected by snapshot validation." >&2
+          exit 1
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
