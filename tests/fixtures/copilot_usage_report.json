@@ -1,0 +1,25 @@
+{
+  "_source": "Copilot CLI 1.0.100 --usage-output-file, run 39346008076; strings replaced, numbers kept",
+  "totalPremiumRequestCost": 1,
+  "totalUserRequests": 1,
+  "totalNanoAiu": 103832000,
+  "aiCreditsStatus": "REDACTED",
+  "tokenDetails": {"input": {"tokenCount": 6}, "cache_read": {"tokenCount": 5947}, "cache_write": {"tokenCount": 5186}, "output": {"tokenCount": 660}},
+  "totalApiDurationMs": 9459,
+  "sessionStartTime": "2026-10-20T00:10:14.000Z",
+  "codeChanges": {"linesAdded": 0, "linesRemoved": 0, "filesModifiedCount": 0},
+  "modelMetrics": {
+    "model-a": {
+      "requests": {"count": 2, "cost": 1},
+      "usage": {"inputTokens": 11139, "outputTokens": 660, "cacheReadTokens": 5947, "cacheWriteTokens": 5186, "reasoningTokens": 319},
+      "cacheExpiresAt": "2026-10-20T00:15:14.000Z",
+      "totalNanoAiu": 103832000,
+      "aiCreditsStatus": "REDACTED"
+    }
+  },
+  "agentMetrics": {"main": {"totalApiDurationMs": 9459, "totalNanoAiu": 103832000, "modelMetrics": {"model-a": {"requests": {"count": 2, "cost": 1}}}}},
+  "providerModelMetrics": [{"provider": {"id": "REDACTED", "label": "REDACTED", "kind": "REDACTED"}, "modelId": "model-a", "metrics": {"requests": {"count": 2, "cost": 1}, "totalNanoAiu": 103832000}}],
+  "currentModel": "model-a",
+  "lastCallInputTokens": 7016,
+  "lastCallOutputTokens": 543
+}
