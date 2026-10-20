@@ -9,6 +9,8 @@ from autopoesis.core import EvolutionError
 from autopoesis.queue_snapshot import (
     bind_source_artifact,
     create_queue_snapshot_manifest,
+    latest_source_run_id,
+    require_latest_source_run,
     validate_queue_snapshot,
     validate_restore_source_run,
 )
@@ -340,6 +342,93 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         for payload, message in cases:
             with self.subTest(payload=payload), self.assertRaisesRegex(ValueError, message):
                 bind_source_artifact(source, payload, requested_run_id=12345)
+
+
+    def _dispatch_run(self, run_id, **overrides):
+        run = {
+            "id": run_id,
+            "conclusion": "success",
+            "event": "workflow_dispatch",
+            "head_branch": "main",
+            "path": ".github/workflows/ci.yml@refs/heads/main",
+        }
+        return {**run, **overrides}
+
+    def _latest_check(self, source_run_id, runs, current_run_id=500):
+        return require_latest_source_run(
+            {"source_run_id": source_run_id},
+            {"workflow_runs": runs},
+            current_run_id=current_run_id,
+            current_branch="main",
+        )
+
+    def test_latest_source_run_is_accepted_and_recorded(self):
+        runs = [self._dispatch_run(500, conclusion=None), self._dispatch_run(300), self._dispatch_run(200)]
+
+        provenance = self._latest_check(300, runs)
+
+        self.assertTrue(provenance["source_is_latest"])
+        self.assertEqual(provenance["source_branch"], "main")
+
+    def test_older_snapshot_replay_is_rejected(self):
+        runs = [self._dispatch_run(300), self._dispatch_run(200)]
+
+        with self.assertRaisesRegex(ValueError, "not the latest snapshot.*latest is 300"):
+            self._latest_check(200, runs)
+
+    def test_runs_that_cannot_hold_a_snapshot_do_not_count_as_newer(self):
+        runs = [
+            self._dispatch_run(500),
+            self._dispatch_run(450, conclusion="failure"),
+            self._dispatch_run(440, event="push"),
+            self._dispatch_run(430, head_branch="other"),
+            self._dispatch_run(420, path=".github/workflows/other.yml@refs/heads/main"),
+            self._dispatch_run("410"),
+            "not-a-run",
+            self._dispatch_run(300),
+        ]
+
+        self.assertTrue(self._latest_check(300, runs)["source_is_latest"])
+
+    def test_source_from_another_branch_is_rejected(self):
+        runs = [self._dispatch_run(300, head_branch="other"), self._dispatch_run(200)]
+
+        with self.assertRaisesRegex(ValueError, "not the latest snapshot.*latest is 200"):
+            self._latest_check(300, runs)
+
+    def test_automatic_selection_picks_newest_eligible_run_and_skips_the_current_one(self):
+        runs = [
+            self._dispatch_run(500),
+            self._dispatch_run(450, conclusion="failure"),
+            self._dispatch_run(300),
+            self._dispatch_run(200),
+        ]
+
+        self.assertEqual(
+            latest_source_run_id({"workflow_runs": runs}, current_run_id=500, current_branch="main"),
+            300,
+        )
+
+    def test_automatic_selection_fails_closed_without_an_eligible_run(self):
+        runs = [self._dispatch_run(500), self._dispatch_run(300, head_branch="other")]
+
+        with self.assertRaisesRegex(ValueError, "No successful workflow_dispatch"):
+            latest_source_run_id({"workflow_runs": runs}, current_run_id=500, current_branch="main")
+
+    def test_latest_check_fails_closed_on_missing_or_malformed_run_list(self):
+        cases = (
+            ("no candidate runs", {"workflow_runs": []}, "No successful workflow_dispatch"),
+            ("missing array", {}, "workflow_runs array"),
+            ("not an object", [], "JSON object"),
+        )
+        for label, payload, message in cases:
+            with self.subTest(case=label), self.assertRaisesRegex(ValueError, message):
+                require_latest_source_run(
+                    {"source_run_id": 300},
+                    payload,
+                    current_run_id=500,
+                    current_branch="main",
+                )
 
 
 if __name__ == "__main__":
