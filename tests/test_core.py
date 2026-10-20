@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from run_tasks import discover_tasks
+from run_tasks import discover_tasks, execute_task
 from autopoesis.task_queue import load_queue, record_outcome, record_outcome_file, update_queue_file
-from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact
+from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, validate_patch_artifact, verify_test_patch_in_sandbox
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,6 +101,38 @@ class EvolutionCoreTests(unittest.TestCase):
             reloaded = load_queue(path)
             self.assertEqual(reloaded["items"][0]["status"], "SELECTED")
             self.assertEqual(len(reloaded["history"]), 2)
+
+    def test_queue_snapshot_restores_across_clean_directory_and_merge_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original_path = root / "first-run" / "TASK_QUEUE.json"
+            restored_path = root / "clean-run" / "TASK_QUEUE.json"
+            candidate = {
+                "id": "DISC-RESTORE-001",
+                "type": "proposal",
+                "source": "autopoesis/example.py",
+                "evidence": "snapshot restoration acceptance test",
+                "description": "Verify restored queue state.",
+            }
+
+            update_queue_file(original_path, [candidate])
+            record_outcome_file(original_path, candidate["id"], "IN_PROGRESS", "first run")
+            original = load_queue(original_path)
+            original_bytes = original_path.read_bytes()
+
+            restored_path.parent.mkdir(parents=True)
+            restored_path.write_bytes(original_bytes)
+            restored = load_queue(restored_path)
+            self.assertEqual(restored, original)
+
+            merged = update_queue_file(restored_path, [candidate])
+            after_merge = load_queue(restored_path)
+            self.assertEqual(merged["added"], 0)
+            self.assertEqual(after_merge["items"][0]["id"], candidate["id"])
+            self.assertEqual(after_merge["items"][0]["status"], "IN_PROGRESS")
+            self.assertEqual(after_merge["items"][0]["attempts"], 1)
+            self.assertEqual(after_merge["history"], original["history"])
+            self.assertEqual(len(after_merge["items"]), 1)
 
     def test_queue_rejects_duplicate_ids_in_existing_state(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -244,6 +276,29 @@ class EvolutionCoreTests(unittest.TestCase):
                 apply_patch_to_sandbox(artifact, sandbox)
             self.assertEqual(target.read_text(encoding="utf-8"), "KEEP = True\\n")
 
+    def test_patch_application_rejects_symlinked_tests_directory(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            source = repository / "autopoesis" / "example.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("VALUE = 1\\n", encoding="utf-8")
+            artifact = prepare_patch_artifact(
+                {"id": "DISC-SYMLINK", "source": "autopoesis/example.py"},
+                repository,
+            )
+            sandbox = root / "sandbox"
+            sandbox.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            os.symlink(outside, sandbox / "tests", target_is_directory=True)
+
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                apply_patch_to_sandbox(artifact, sandbox)
+            self.assertFalse((outside / "test_example.py").exists())
+
     def test_bounded_writer_rejects_path_traversal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -256,6 +311,91 @@ class EvolutionCoreTests(unittest.TestCase):
                     root,
                 )
 
+
+    def test_patch_task_pass_reports_that_generated_tests_were_not_run(self):
+        task = {
+            "id": "DISC-REPORT",
+            "type": "prepare_test_patch",
+            "source": "autopoesis/task_queue.py",
+        }
+        result = execute_task(task, ROOT / "TASK_QUEUE.json")
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(
+            result["verification"]["level"],
+            "PATCH_ARTIFACT_PREPARED_AND_VALIDATED",
+        )
+        self.assertFalse(result["verification"]["generated_code_executed"])
+        self.assertFalse(result["verification"]["tests_executed"])
+
+    def test_sandbox_task_pass_reports_application_not_test_execution(self):
+        task = {
+            "id": "DISC-REPORT-SANDBOX",
+            "type": "apply_test_patch_sandbox",
+            "source": "autopoesis/task_queue.py",
+        }
+        result = execute_task(task, ROOT / "TASK_QUEUE.json")
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(
+            result["verification"]["level"],
+            "PATCH_APPLIED_TO_DISPOSABLE_SANDBOX",
+        )
+        self.assertFalse(result["verification"]["generated_code_executed"])
+        self.assertFalse(result["verification"]["tests_executed"])
+        self.assertFalse(result["verification"]["repository_modified"])
+
+    def test_generated_import_test_executes_in_disposable_package_copy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "autopoesis"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            source = package / "example.py"
+            source.write_text("VALUE = 42\n", encoding="utf-8")
+
+            result = verify_test_patch_in_sandbox(
+                {"id": "DISC-VERIFY", "source": "autopoesis/example.py"},
+                root,
+            )
+
+            self.assertEqual(result["verification_status"], "PASS", result["stdout"] + result["stderr"])
+            self.assertEqual(result["return_code"], 0)
+            self.assertTrue(result["generated_code_executed"])
+            self.assertFalse(result["repository_modified"])
+            self.assertIn("Ran 1 test", result["stderr"])
+            self.assertFalse((root / "tests" / "test_example.py").exists())
+            self.assertEqual(source.read_text(encoding="utf-8"), "VALUE = 42\n")
+
+    def test_sandbox_verification_rejects_symlinked_package_root(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "real_package"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
+            os.symlink(package, root / "autopoesis", target_is_directory=True)
+
+            with self.assertRaisesRegex(ValueError, "symlinked source package"):
+                verify_test_patch_in_sandbox(
+                    {"id": "DISC-SYMLINK", "source": "autopoesis/example.py"},
+                    root,
+                )
+
+    def test_sandbox_verification_rejects_unbounded_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "autopoesis"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "between 1 and 30 seconds"):
+                verify_test_patch_in_sandbox(
+                    {"id": "DISC-TIMEOUT", "source": "autopoesis/example.py"},
+                    root,
+                    timeout_seconds=999,
+                )
 
 if __name__ == "__main__":
     unittest.main()
