@@ -1,0 +1,267 @@
+name: Copilot core test writer
+
+# The core's Copilot proposes one new test file. The core validates it as a patch
+# artifact; a separate job with no token permissions and no secrets runs it in an
+# offline container on a throwaway copy. Nothing is pushed, no PR is opened, and
+# review stays mandatory.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Module to write tests for (only modules without their own test file)
+        type: choice
+        options:
+          - autopoesis/executor.py
+          - autopoesis/task_queue.py
+        default: autopoesis/executor.py
+
+permissions:
+  contents: read
+
+# One run at a time across all refs: every Copilot run reads and writes the shared budget ledger.
+concurrency:
+  group: copilot-agent-budget
+  cancel-in-progress: false
+
+env:
+  BUDGET_LEDGER: .agent-budget/copilot.json
+  TASK_KIND: test-writer
+  PYTHONDONTWRITEBYTECODE: "1"
+  COPILOT_CLI_VERSION: "1.0.100"
+
+jobs:
+  write:
+    name: Copilot writes one test file, artifact only
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    outputs:
+      run: ${{ steps.budget.outputs.run }}
+      target: ${{ steps.task.outputs.target }}
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Require Copilot secret
+        shell: bash
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          if [[ -z "${COPILOT_GITHUB_TOKEN}" ]]; then
+            echo "::error::Missing repository secret COPILOT_GITHUB_TOKEN."
+            exit 1
+          fi
+          echo "Required secret is present; value not displayed."
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Choose the task
+        id: task
+        shell: bash
+        env:
+          SOURCE: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          case "$SOURCE" in
+            autopoesis/executor.py|autopoesis/task_queue.py) ;;
+            *) echo "::error::Unsupported source: $SOURCE"; exit 1 ;;
+          esac
+          stem="$(basename "$SOURCE" .py)"
+          echo "target=tests/test_${stem}.py" >> "$GITHUB_OUTPUT"
+          echo "task_id=CP-TEST-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore budget ledger
+        uses: actions/cache/restore@v4
+        with:
+          path: .agent-budget
+          key: copilot-budget-${{ github.run_id }}
+          restore-keys: copilot-budget-
+
+      - name: Ask the core for a budget decision
+        id: budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          python -m autopoesis.agent_budget plan --ledger "$BUDGET_LEDGER" --kind "$TASK_KIND" > budget-plan.json
+          status=$?
+          set -e
+          cat budget-plan.json
+          if [[ "$status" -eq 3 ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "## Copilot run skipped by the core budget" >> "$GITHUB_STEP_SUMMARY"
+            python -c 'import json; d=json.load(open("budget-plan.json")); print("- Reason:", d["reason"]); print("- Retry after:", d.get("retry_after"))' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          test "$status" -eq 0
+          cap="$(python -c 'import json; print(json.load(open("budget-plan.json"))["max_ai_credits"])')"
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "cap=$cap" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.budget.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Copilot CLI
+        if: steps.budget.outputs.run == 'true'
+        run: npm install --global "@github/copilot@${COPILOT_CLI_VERSION}"
+
+      - name: Ask Copilot for one test file
+        id: agent
+        if: steps.budget.outputs.run == 'true'
+        shell: bash
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          CREDIT_CAP: ${{ steps.budget.outputs.cap }}
+          SOURCE: ${{ inputs.source }}
+          TARGET: ${{ steps.task.outputs.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/budget"
+          stderr_file="$RUNNER_TEMP/budget/stderr.txt"
+          usage_file="$RUNNER_TEMP/budget/usage.json"
+          prompt="Read ${SOURCE} and the existing tests under tests/ using read-only tools. Write one new Python unittest file for ${TARGET} that tests the public behaviour of ${SOURCE}, including at least one rejected (fail-closed) input. Rules: the first line must be exactly '# Agent: Copilot (core)'; standard library only; no network, no subprocess, no environment variables; write files only inside a tempfile.TemporaryDirectory; do not modify or duplicate existing tests. Return only the complete file contents, with no explanation. Do not use shell, network, git, or external tools, and do not create or edit files."
+          set +e
+          timeout 300s copilot -p "$prompt" -s --no-ask-user --available-tools='view,grep,glob' --deny-tool='shell' \
+            --max-ai-credits "$CREDIT_CAP" --usage-output-file "$usage_file" > copilot-response.txt 2>"$stderr_file"
+          cli_status=$?
+          set -e
+          echo "exit_code=$cli_status" >> "$GITHUB_OUTPUT"
+          if [[ "$cli_status" -ne 0 ]]; then
+            echo "::error::Copilot task failed (exit $cli_status). Redacted diagnostic follows."
+            python -c 'import os,pathlib,sys; s=pathlib.Path(sys.argv[1]).read_text(errors="replace"); print(s.replace(os.environ.get("COPILOT_GITHUB_TOKEN", ""), "[REDACTED]"))' "$stderr_file"
+            exit "$cli_status"
+          fi
+
+      - name: Record the run in the budget ledger
+        if: always() && steps.budget.outputs.run == 'true'
+        shell: bash
+        env:
+          CREDIT_CAP: ${{ steps.budget.outputs.cap }}
+          EXIT_CODE: ${{ steps.agent.outputs.exit_code || '1' }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Redact before the core reads it; stderr never leaves the runner.
+          stderr_file="$RUNNER_TEMP/budget/stderr.txt"
+          if [[ -f "$stderr_file" ]]; then
+            python -c 'import os,pathlib,sys; p=pathlib.Path(sys.argv[1]); t=os.environ.get("COPILOT_GITHUB_TOKEN",""); s=p.read_text(errors="replace"); p.write_text(s.replace(t,"[REDACTED]") if t else s)' "$stderr_file"
+          fi
+          python -m autopoesis.agent_budget record --ledger "$BUDGET_LEDGER" --kind "$TASK_KIND" \
+            --task-id "run-${GITHUB_RUN_ID}" --cap "$CREDIT_CAP" --exit-code "$EXIT_CODE" \
+            --usage-file "$RUNNER_TEMP/budget/usage.json" --stderr-file "$stderr_file" | tee budget-record.json
+          {
+            echo "## Core budget"
+            echo "- Credit cap for this run: $CREDIT_CAP"
+            echo '```json'
+            cat budget-record.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save budget ledger
+        if: always() && steps.budget.outputs.run == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .agent-budget
+          key: copilot-budget-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Validate the proposal in the core
+        if: steps.budget.outputs.run == 'true'
+        shell: bash
+        env:
+          TARGET: ${{ steps.task.outputs.target }}
+          TASK_ID: ${{ steps.task.outputs.task_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p copilot-test-output
+          python -m autopoesis.copilot_writer --task-id "$TASK_ID" --target "$TARGET" \
+            --response-file copilot-response.txt --output copilot-test-output/artifact.json | tee writer-result.json
+          {
+            echo "## Copilot test proposal"
+            echo "- Target: $TARGET"
+            echo '```json'
+            cat writer-result.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the patch artifact
+        if: steps.budget.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-test-proposal
+          path: copilot-test-output/artifact.json
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    name: Run the proposed test in a throwaway copy
+    needs: write
+    if: needs.write.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # No token permissions and no secrets. The generated test itself runs in a container without
+    # network, runner environment or runner files, so it cannot reach the Actions cache or
+    # runtime token and cannot poison the shared budget ledger.
+    permissions: {}
+    env:
+      # python:3.12-slim, multi-arch index digest looked up on 2026-10-20.
+      TEST_IMAGE: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download the patch artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: copilot-test-proposal
+          path: ${{ runner.temp }}/proposal
+
+      - name: Apply in a sandbox copy and run only the new test
+        shell: bash
+        env:
+          TARGET: ${{ needs.write.outputs.target }}
+        run: |
+          set -euo pipefail
+          sandbox="$RUNNER_TEMP/sandbox"
+          mkdir -p "$sandbox"
+          git archive HEAD | tar -x -C "$sandbox"
+          python - "$RUNNER_TEMP/proposal/artifact.json" "$sandbox" <<'PY'
+          import json, sys
+          from pathlib import Path
+          from autopoesis.executor import apply_patch_to_sandbox
+          artifact = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          print(json.dumps(apply_patch_to_sandbox(artifact, Path(sys.argv[2]))))
+          PY
+          module="$(python -c 'import sys; print(sys.argv[1][:-3].replace("/", "."))' "$TARGET")"
+          docker pull --quiet "$TEST_IMAGE"
+          set +e
+          timeout 120s docker run --rm --network none --read-only --tmpfs /tmp --user 65534:65534 \
+            --cap-drop ALL --security-opt no-new-privileges -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$sandbox":/work:ro -w /work "$TEST_IMAGE" \
+            python -m unittest -v "$module" 2>&1 | tee "$RUNNER_TEMP/test-output.txt"
+          test_status=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "## Proposed test run (isolated container on a copy, not the repository)"
+            echo "- Module: $module"
+            echo "- Exit code: $test_status"
+            echo '```text'
+            tail -n 60 "$RUNNER_TEMP/test-output.txt"
+            echo '```'
+            echo "- The test is not committed. A reviewer must accept it before it enters a PR."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$test_status"
