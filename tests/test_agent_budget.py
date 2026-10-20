@@ -14,6 +14,7 @@ from autopoesis.agent_budget import (
     plan,
     record_run,
     reported_credits,
+    usage_readings,
     save_ledger,
 )
 from autopoesis.core import EvolutionError
@@ -21,6 +22,8 @@ from autopoesis.core import EvolutionError
 
 ROOT = Path(__file__).resolve().parents[1]
 OCT_10 = datetime(2026, 10, 10, 9, 0, tzinfo=timezone.utc)
+# Tests of learning from reported spending assume the allowance unit has been resolved.
+TRUSTED = "totalPremiumRequestCost"
 
 
 def record(ledger, now, policy, *, kind="docs", cap=10, exit_code=0, usage=None, stderr="", task_id="t1"):
@@ -43,7 +46,7 @@ class UnknownAllowanceTests(unittest.TestCase):
         self.assertEqual(plan(ledger, OCT_10 + timedelta(days=1), "docs", policy)["decision"], "RUN")
 
     def test_exhaustion_blocks_until_monthly_reset_and_learns_allowance(self):
-        policy = BudgetPolicy()
+        policy = BudgetPolicy(allowance_unit_field=TRUSTED)
         ledger = record(new_ledger(OCT_10, policy), OCT_10, policy, cap=60, usage={"totalPremiumRequestCost": 40})
         ledger = record(ledger, OCT_10, policy, cap=30, exit_code=1,
                         stderr="Error: monthly AI credits allowance exhausted for this plan")
@@ -82,7 +85,7 @@ class UnknownAllowanceTests(unittest.TestCase):
             self.assertEqual(ledger["allowance_source"], "unknown")
 
     def test_exhaustion_with_nothing_spent_learns_nothing(self):
-        policy = BudgetPolicy()
+        policy = BudgetPolicy(allowance_unit_field=TRUSTED)
         ledger = record(new_ledger(OCT_10, policy), OCT_10, policy, exit_code=1,
                         usage={"totalPremiumRequestCost": 0}, stderr="HTTP 402 Payment Required")
         self.assertEqual(ledger["block_reason"], "ALLOWANCE_EXHAUSTED")
@@ -125,7 +128,7 @@ class KnownAllowanceTests(unittest.TestCase):
         self.assertEqual(plan(ledger, OCT_10 + timedelta(days=1), "docs", policy)["decision"], "RUN")
 
     def test_monthly_budget_stops_when_less_than_a_minimum_run_is_left(self):
-        policy = BudgetPolicy(configured_allowance=80)
+        policy = BudgetPolicy(configured_allowance=80, allowance_unit_field=TRUSTED)
         last_day = datetime(2026, 10, 31, 8, 0, tzinfo=timezone.utc)
         ledger = record(new_ledger(last_day, policy), last_day, policy, usage={"totalPremiumRequestCost": 75})
         decision = plan(ledger, last_day, "docs", policy)
@@ -140,31 +143,43 @@ class ChargingTests(unittest.TestCase):
         self.assertEqual(ledger["used"], 7.0)
         self.assertIsNone(ledger["runs"][-1]["reported"])
 
-    def test_real_cli_report_is_charged_from_its_consumption_fields(self):
+    def test_unresolved_unit_charges_the_whole_cap_and_keeps_raw_readings(self):
+        policy = BudgetPolicy()
         usage = json.loads((ROOT / "tests" / "fixtures" / "copilot_usage_report.json").read_text(encoding="utf-8"))
-        self.assertEqual(reported_credits(usage), 1.0)
-        usage["totalPremiumRequestCost"] = 0
-        self.assertAlmostEqual(reported_credits(usage), 0.103832)
+        ledger = record(new_ledger(OCT_10, policy), OCT_10, policy, cap=60, usage=usage)
+        self.assertEqual(ledger["used"], 60.0)
+        run = ledger["runs"][-1]
+        self.assertIsNone(run["reported"])
+        self.assertEqual(run["usage"]["totalPremiumRequestCost"], 1.0)
+        self.assertAlmostEqual(run["usage"]["totalNanoAiu"], 0.103832)
+
+    def test_trusted_unit_field_is_charged_alone(self):
+        readings = usage_readings({"totalPremiumRequestCost": 1, "totalNanoAiu": 3_000_000_000})
+        self.assertEqual(reported_credits(readings, BudgetPolicy(allowance_unit_field="totalPremiumRequestCost")), 1.0)
+        self.assertEqual(reported_credits(readings, BudgetPolicy(allowance_unit_field="totalNanoAiu")), 3.0)
+        with self.assertRaises(EvolutionError):
+            BudgetPolicy(allowance_unit_field="creditsAvailable")
 
     def test_limit_and_balance_fields_are_never_read_as_consumption(self):
+        empty = {"totalPremiumRequestCost": None, "totalNanoAiu": None}
         for key in ("creditLimit", "creditsAvailable", "remainingCredits", "aiCredits", "premium_requests"):
-            self.assertIsNone(reported_credits({key: 5}), key)
+            self.assertEqual(usage_readings({key: 5}), empty, key)
         nested = {"modelMetrics": {"m": {"requests": {"cost": 9}, "totalNanoAiu": 9_000_000_000}}}
-        self.assertIsNone(reported_credits(nested))
-        self.assertEqual(reported_credits({"totalPremiumRequestCost": 1, "creditLimit": 300}), 1.0)
-        self.assertIsNone(reported_credits({"totalPremiumRequestCost": True}))
-        self.assertIsNone(reported_credits({"totalPremiumRequestCost": -1}))
-        self.assertIsNone(reported_credits([{"totalPremiumRequestCost": 1}]))
+        self.assertEqual(usage_readings(nested), empty)
+        self.assertEqual(usage_readings({"totalPremiumRequestCost": 1, "creditLimit": 300})["totalPremiumRequestCost"], 1.0)
+        for bad in (True, -1, "1"):
+            self.assertEqual(usage_readings({"totalPremiumRequestCost": bad}), empty)
+        self.assertEqual(usage_readings([{"totalPremiumRequestCost": 1}]), empty)
 
     def test_report_without_consumption_field_charges_the_whole_cap(self):
-        policy = BudgetPolicy()
+        policy = BudgetPolicy(allowance_unit_field=TRUSTED)
         ledger = record(new_ledger(OCT_10, policy), OCT_10, policy, cap=30,
                         usage={"creditsAvailable": 250, "remainingCredits": 250})
         self.assertEqual(ledger["used"], 30.0)
         self.assertIsNone(ledger["runs"][-1]["reported"])
 
     def test_month_rollover_resets_spending_but_keeps_learned_costs(self):
-        policy = BudgetPolicy()
+        policy = BudgetPolicy(allowance_unit_field=TRUSTED)
         ledger = record(new_ledger(OCT_10, policy), OCT_10, policy, usage={"totalPremiumRequestCost": 4})
         november = datetime(2026, 11, 2, tzinfo=timezone.utc)
         ledger = record(ledger, november, policy, usage={"totalPremiumRequestCost": 2})
@@ -202,7 +217,8 @@ class LedgerFileTests(unittest.TestCase):
             path.write_text("{not json", encoding="utf-8")
             with self.assertRaises(EvolutionError):
                 load_ledger(path, OCT_10, policy)
-            corrupt_runs = [{}, {**ledger["runs"][0], "charged": -1000}, {**ledger["runs"][0], "at": "2026-09-01T00:00:00+00:00"}]
+            corrupt_runs = [{}, {**ledger["runs"][0], "charged": -1000}, {**ledger["runs"][0], "at": "2026-09-01T00:00:00+00:00"},
+                            {**ledger["runs"][0], "usage": {"creditLimit": 300}}]
             for broken in ({**ledger, "used": -1}, {**ledger, "blocked_until": OCT_10.isoformat()},
                            *({**ledger, "runs": [run]} for run in corrupt_runs)):
                 path.write_text(json.dumps(broken), encoding="utf-8")
@@ -237,7 +253,9 @@ class LedgerFileTests(unittest.TestCase):
                 cwd=ROOT, capture_output=True, text=True,
             )
             self.assertEqual(recorded.returncode, 0, recorded.stderr)
-            self.assertEqual(json.loads(recorded.stdout)["charged"], 2.0)
+            run = json.loads(recorded.stdout)
+            self.assertEqual(run["charged"], float(cap))
+            self.assertEqual(run["usage"]["totalPremiumRequestCost"], 2.0)
 
             blocked = subprocess.run(base + ["plan"] + common + ["--allowance", "0"], cwd=ROOT,
                                      capture_output=True, text=True)

@@ -3,8 +3,9 @@
 The Copilot Free allowance of AI credits is not published as a number, so the
 core does not assume one. It learns from its own runs:
 
-- every run is charged the credits the CLI reported, or the whole per-run cap
-  when no usage report can be read (fail closed);
+- every run is charged the whole per-run cap (fail closed) unless the policy names
+  the usage-report field that counts in allowance units; the raw readings are kept
+  with each run either way;
 - the average charge per task kind becomes the estimate for the next plan;
 - an "allowance exhausted" error blocks runs until the monthly reset
   (00:00 UTC on the first day of the month) and records the spent amount as
@@ -62,6 +63,8 @@ class BudgetPolicy:
     probe_runs_per_day: int = 2
     configured_allowance: float | None = None
     max_backoff_hours: int = 24
+    # Which usage-report field counts in allowance units is unresolved, so none is trusted yet.
+    allowance_unit_field: str | None = None
 
     def __post_init__(self) -> None:
         if not _is_amount(self.min_credits_per_run) or self.min_credits_per_run < 1:
@@ -74,6 +77,8 @@ class BudgetPolicy:
             raise EvolutionError("configured_allowance must be a non-negative number")
         if not _is_count(self.max_backoff_hours) or self.max_backoff_hours < 1:
             raise EvolutionError("max_backoff_hours must be a positive integer")
+        if self.allowance_unit_field is not None and self.allowance_unit_field not in USAGE_FIELDS:
+            raise EvolutionError(f"allowance_unit_field must be one of {sorted(USAGE_FIELDS)} or None")
 
 
 def month_period(now: datetime) -> str:
@@ -137,6 +142,7 @@ def validate_ledger(ledger: Any) -> dict[str, Any]:
             or not _is_amount(run.get("cap"))
             or not _is_amount(run.get("charged"))
             or (run.get("reported") is not None and not _is_amount(run["reported"]))
+            or ("usage" in run and not _valid_readings(run["usage"]))
             or not isinstance(run.get("exit_code"), int)
             or run.get("outcome") not in RUN_OUTCOMES
         ):
@@ -305,7 +311,8 @@ def record_run(
         raise EvolutionError("Run cap must be a non-negative number")
     updated = roll_period(ledger, now, policy)
 
-    reported = reported_credits(usage)
+    readings = usage_readings(usage)
+    reported = reported_credits(readings, policy)
     charged = reported if reported is not None else float(cap)
     updated["used"] = round(updated["used"] + charged, 6)
     if exit_code == 0 or reported is not None:
@@ -342,6 +349,7 @@ def record_run(
         "task_id": task_id,
         "cap": float(cap),
         "reported": reported,
+        "usage": readings,
         "charged": charged,
         "exit_code": exit_code,
         "outcome": outcome,
@@ -351,24 +359,33 @@ def record_run(
 
 
 # Top-level consumption fields of the Copilot CLI 1.0.100 `--usage-output-file` report,
-# observed in run 39346008076. Which unit the AI-credit allowance counts in is not
-# documented, so the larger reading is charged. Every other field (limits, balances,
-# per-model copies) is ignored.
-PREMIUM_REQUEST_COST_FIELD = "totalPremiumRequestCost"
-NANO_AIU_FIELD = "totalNanoAiu"
-NANO_PER_AIU = 1_000_000_000
+# observed in run 39346008076, with the factor that turns each into a plain number.
+# Every other field (limits, balances, per-model copies) is ignored.
+USAGE_FIELDS = {"totalPremiumRequestCost": 1, "totalNanoAiu": 1_000_000_000}
 
 
-def reported_credits(usage: Any) -> float | None:
-    """Return the credits a usage report says the run consumed, or None if it says nothing usable."""
-    if not isinstance(usage, dict):
+def usage_readings(usage: Any) -> dict[str, float | None]:
+    """Return the consumption fields of a usage report, each None when absent or unusable."""
+    report = usage if isinstance(usage, dict) else {}
+    return {
+        field: float(report[field]) / scale if _is_amount(report.get(field)) else None
+        for field, scale in USAGE_FIELDS.items()
+    }
+
+
+def reported_credits(readings: dict[str, float | None], policy: BudgetPolicy) -> float | None:
+    """Return the run's spending in allowance units, or None while no field is trusted."""
+    if policy.allowance_unit_field is None:
         return None
-    readings = []
-    if _is_amount(usage.get(PREMIUM_REQUEST_COST_FIELD)):
-        readings.append(float(usage[PREMIUM_REQUEST_COST_FIELD]))
-    if _is_amount(usage.get(NANO_AIU_FIELD)):
-        readings.append(usage[NANO_AIU_FIELD] / NANO_PER_AIU)
-    return max(readings) if readings else None
+    return readings.get(policy.allowance_unit_field)
+
+
+def _valid_readings(readings: Any) -> bool:
+    return (
+        isinstance(readings, dict)
+        and set(readings) == set(USAGE_FIELDS)
+        and all(value is None or _is_amount(value) for value in readings.values())
+    )
 
 
 def _is_amount(value: Any) -> bool:
