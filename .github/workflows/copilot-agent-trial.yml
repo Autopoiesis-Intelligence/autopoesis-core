@@ -135,6 +135,17 @@ jobs:
           python -m autopoesis.agent_budget record --ledger "$BUDGET_LEDGER" --kind "$TASK_KIND" \
             --task-id "run-${GITHUB_RUN_ID}" --cap "$CREDIT_CAP" --exit-code "$EXIT_CODE" \
             --usage-file "$RUNNER_TEMP/budget/usage.json" --stderr-file "$stderr_file" | tee budget-record.json
+          # Shape of the usage report for the log: key paths with numbers and booleans; strings show only their length.
+          python -c 'import json,sys
+          def walk(v,p):
+              if isinstance(v,dict):
+                  for k,i in v.items(): walk(i,f"{p}.{k}")
+              elif isinstance(v,list):
+                  for n,i in enumerate(v): walk(i,f"{p}[{n}]")
+              elif isinstance(v,str): print(f"{p}: <str len {len(v)}>")
+              else: print(f"{p}: {v!r}")
+          try: walk(json.load(open(sys.argv[1])),"$")
+          except (OSError,ValueError) as e: print(f"usage report unreadable: {type(e).__name__}")' "$RUNNER_TEMP/budget/usage.json"
           {
             echo "## Core budget"
             echo "- Credit cap for this run: $CREDIT_CAP"
