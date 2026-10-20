@@ -86,6 +86,8 @@ The `Agent:` text line identifies the writer, but it is not proof of authorship.
 
 **Overdue notification.** When `notify_owner` is true, the Claude development loop sends the owner one message in the project thread. Only after that message is sent does it add `audit-overdue`. The label records that the notification went out, so later checks see it and do not notify again. The label on its own is not a notification. Without the loop, nobody is notified.
 
+The order is deliberate. If the loop stops between sending the message and adding the label, the next check sends the message again. A failure can therefore duplicate a notification but can never lose it. The opposite order (label first) would turn a failed send into a silent miss. Delivery is at least once, not exactly once.
+
 **Enforcement.** `autopoesis/audit_verdict.py` computes the state and the label changes from the PR facts and comments. It makes no network calls. Today the Claude development loop applies the result. Until real GitHub events have been observed end to end, audit state is checked by an agent, not automated by the repository.
 
 **No retroactive verdicts.** Free-text audits posted before this format, for example in Issue #22, are not verdicts. They are never converted, and they authorize nothing.
