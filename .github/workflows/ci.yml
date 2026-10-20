@@ -35,6 +35,12 @@ permissions:
   actions: read
   contents: read
 
+# Dispatch runs on one branch run one at a time, so a restore always starts after
+# the previous snapshot run has finished and selects it. Other events are not grouped.
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && format('queue-snapshot-{0}', github.ref) || format('ci-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-latest
