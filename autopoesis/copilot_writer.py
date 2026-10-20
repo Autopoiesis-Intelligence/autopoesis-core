@@ -97,7 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        args.output.unlink(missing_ok=True)
+        # Never delete or reuse an existing file: a stale artifact must not pass as a fresh one.
+        if args.output.exists() or args.output.is_symlink():
+            raise ValueError(f"Output already exists: {args.output}")
         writer = CopilotTestWriter(args.response_file.read_text(encoding="utf-8"))
         artifact = prepare_patch_artifact(
             {"id": args.task_id, "target": args.target}, args.repository_root, writer

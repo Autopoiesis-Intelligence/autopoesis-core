@@ -92,14 +92,22 @@ class CopilotTestWriterTests(unittest.TestCase):
             self.assertEqual(accepted.returncode, 0, accepted.stderr)
             self.assertEqual(validate_patch_artifact(json.loads(output.read_text(encoding="utf-8")))["status"], "VALID")
 
-            # A rejection removes the earlier artifact instead of leaving stale state behind.
+            # An existing output is refused and kept, including when it is the response itself.
+            accepted_artifact = output.read_bytes()
+            stale = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(stale.returncode, 2, stale.stderr)
+            self.assertEqual(output.read_bytes(), accepted_artifact)
+            same = command[:-1] + [str(response)]
+            self.assertEqual(subprocess.run(same, cwd=ROOT, capture_output=True, text=True).returncode, 2)
+            self.assertEqual(response.read_text(encoding="utf-8"), GOOD)
+
+            output.unlink()
             for bad in ("import os\n", AGENT_LINE + "\nx=" + "~" * 11000 + "1\n"):
                 response.write_text(bad, encoding="utf-8")
                 rejected = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
                 self.assertEqual(rejected.returncode, 2, rejected.stderr)
                 self.assertEqual(json.loads(rejected.stdout)["status"], "REJECTED")
                 self.assertFalse(output.exists())
-
 
 if __name__ == "__main__":
     unittest.main()
