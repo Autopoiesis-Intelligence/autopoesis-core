@@ -51,7 +51,11 @@ jobs:
           import os
           import subprocess
           from pathlib import Path
-          from autopoesis.queue_snapshot import bind_source_artifact, validate_restore_source_run
+          from autopoesis.queue_snapshot import (
+              bind_source_artifact,
+              require_latest_source_run,
+              validate_restore_source_run,
+          )
 
           requested_run_id = os.environ["RESTORE_RUN_ID"]
           run = json.loads(Path(".restore-run.json").read_text(encoding="utf-8"))
@@ -72,6 +76,20 @@ jobs:
               provenance,
               artifacts_payload,
               requested_run_id=requested_run_id,
+          )
+          runs_response = subprocess.run(
+              [
+                  "gh", "api",
+                  f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/ci.yml/runs"
+                  f"?event=workflow_dispatch&status=success&branch={os.environ['GITHUB_REF_NAME']}&per_page=100",
+              ],
+              check=True, capture_output=True, text=True,
+          )
+          provenance = require_latest_source_run(
+              provenance,
+              json.loads(runs_response.stdout),
+              current_run_id=os.environ["GITHUB_RUN_ID"],
+              current_branch=os.environ["GITHUB_REF_NAME"],
           )
           Path("QUEUE_RESTORE_PROVENANCE.json").write_text(
               json.dumps(provenance, indent=2, sort_keys=True) + "\n",
