@@ -148,9 +148,12 @@ def validate_patch_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         if claimed_hash != actual_hash:
             raise ValueError(f"Patch file checksum mismatch: {path_value}")
         try:
-            compile(content, path_value, "exec")
+            # Compile the bytes that will be written, so a coding declaration is honoured here too.
+            compile(content.encode("utf-8"), path_value, "exec")
         except SyntaxError as exc:
             raise ValueError(f"Generated Python has invalid syntax: {path_value}: {exc.msg}") from exc
+        except (MemoryError, RecursionError) as exc:
+            raise ValueError(f"Generated Python is too complex to parse: {path_value}") from exc
 
     return {
         "status": "VALID",
