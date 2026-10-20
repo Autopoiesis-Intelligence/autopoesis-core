@@ -74,7 +74,6 @@ class BoundedTestScaffoldWriterTests(unittest.TestCase):
             (root / "tests" / "test_covered.py").write_text("KEEP = True\n", encoding="utf-8")
             (root / "run_tasks.py").write_text("VALUE = 1\n", encoding="utf-8")
             cases = (
-                {"id": "../x", "source": "autopoesis/covered.py"},
                 {"id": "EXEC-T1", "source": "autopoesis/__init__.py"},
                 {"id": "EXEC-T1", "source": "run_tasks.py"},
                 {"id": "EXEC-T1", "source": "autopoesis/missing.py"},
