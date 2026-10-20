@@ -1,73 +1,86 @@
-# GPT ↔ Claude coordination protocol
+# Agent coordination protocol
 
-Status: proposed in PR; not active policy until reviewed and merged.
+Status: proposed in a PR; not active policy until reviewed and merged by the owner.
 
-## Purpose
+This file covers coordination only: who owns which task, how a claim is made, released or taken over, how a result is handed off, and when a PR is ready for the owner. Evidence rules, stop conditions, safety rules, the audit verdict format and the report format live in [`AGENTS.md`](../../AGENTS.md). They are not repeated here; if the two ever disagree, `AGENTS.md` wins.
 
-Coordinate work on this repository when GPT and Claude operate on separate schedules, including a possible 10-minute polling interval. Scheduling is not itself synchronization. Synchronization requires fresh GitHub evidence, explicit task ownership, isolated branches, and a durable handoff.
+## Where state lives
 
-## Source-of-truth hierarchy
+1. Live GitHub state is the source of truth: refs and SHAs, PR base and head, workflow runs and artifacts.
+2. Issue [#22](https://github.com/Autopoiesis-Intelligence/autopoiesis-core/issues/22) is the live ledger for claims and handoffs. Every claim there is still checked against live GitHub state.
+3. Audit verdicts live on the PR they audit (see `AGENTS.md`, "Review and audit").
+4. `DECISIONS.md` records durable decisions. It changes only through a reviewed PR, so it never holds live state.
 
-1. Live GitHub repository state: exact refs/SHAs, PR base/head, workflow runs and artifacts.
-2. Merged repository policy and this protocol, once accepted.
-3. Issue [#22](https://github.com/Autopoiesis-Intelligence/autopoiesis-core/issues/22) is the shared mutable task-claim and handoff thread; its claims must still be checked against live GitHub state.
-4. Open PR diffs and review comments for proposed changes.
-5. `docs/coordination/STATE.md`, `DECISIONS.md`, and `LOG.md` as versioned navigation/history.
-6. Agent reports, old chat summaries, and prior checkpoints as unverified pointers only.
+Agent reports, chat summaries and older checkpoints are pointers to check, not proof.
 
-If sources conflict, stop and record the discrepancy. Never infer current state from an old SHA or report.
+## Identity
 
-## Ten-minute cycle contract
+All agents post through one GitHub account, so the comment author does not say which agent wrote it. Two signals do:
 
-Every scheduled run should be a bounded reconciliation cycle, not an instruction to make a code change every ten minutes:
+- The first line of every claim, handoff or verdict is `Agent: Claude|GPT|Copilot|Manus`.
+- GitHub records the app that posted a comment in `performed_via_github_app`. This is the proof; the text line alone is not.
 
-1. Fetch live default-branch SHA, active branches, open PRs, exact PR head/base SHAs, and all relevant workflow runs.
-2. Read the latest coordination state and the most recent meaningful log entry.
-3. Detect whether another agent already owns the task or is modifying overlapping files/dependencies.
-4. If no safe, unclaimed task exists, perform a read-only audit and report `NO_CHANGE`; do not invent work.
-5. Choose at most one bounded task with satisfied dependencies. Prefer review, tests, and diagnostics before implementation.
-6. Work on a dedicated branch and PR. Never write directly to `main`, force-push, merge or close PRs automatically.
-7. Before writing, re-check the branch head. If it moved unexpectedly, stop and reconcile rather than overwrite.
-8. Record a meaningful handoff only when state changed, a decision is needed, a blocker appeared, or evidence was obtained. Do not create heartbeat commits or repetitive comments.
-9. Finish with BEFORE → ACTION → AFTER → RESULT → PROVEN / NOT PROVEN → REJECTED DIRECTIONS → NEXT SEQ.
+| Agent | App id | App slug | Task prefix |
+|---|---|---|---|
+| Claude | `1236702` | `claude` | `CL-` |
+| GPT | `1144995` | `chatgpt-codex-connector` | `GP-` |
+| Copilot | none known | none known | `CP-` |
+| Manus | none known | none known | `MN-` |
 
-## Task ownership and concurrency
+Copilot and Manus have no verified app yet, so their claims are not counted. Until one is verified, Claude or GPT claims work on their behalf.
 
-- One agent owns one bounded task at a time.
-- The task claim must include agent, task ID, target PR/branch, exact starting SHA, files in scope, and acceptance criteria.
-- GPT and Claude must not edit the same branch or overlapping files concurrently.
-- Before starting work, inspect recent commits, PR updates, and the live handoff for an existing claim.
-- A claim is stale only after checking GitHub activity and asking for/reconciling the latest available result; elapsed time alone does not prove that work stopped.
-- Use issue #22 for short-lived claims and meaningful handoffs. Before edits, post a claim comment containing agent, task ID, starting SHA, branch/PR, files in scope, acceptance criteria, dependencies, and UTC time; after completion, post the result and release the claim.
-- Issue comments are not an atomic lock. If claims overlap, the active owner is unclear, or two runs start concurrently, stop before editing and reconcile. Never pretend a coordination lock exists when it does not.
+## Claims
 
-## Evidence requirements
+A claim comment in #22 starts with this block:
 
-For every substantive claim record:
-- repository and exact ref/SHA;
-- PR URL and exact base/head SHA, if applicable;
-- command/test or workflow name;
-- workflow run ID, conclusion, and run head SHA;
-- artifact URL/hash where relevant;
-- what the evidence proves and what it does not prove.
+```
+Agent: <agent>
+Task: <task ID>
+Claim: OPEN | RELEASED | STALE
+```
 
-Evidence ladder: DESIGN → IMPLEMENTED → REACHABLE → RUNTIME → PERSISTED → AUDITED → CI_PROVEN. Evidence at one SHA does not prove a different SHA. Unit/synthetic PASS does not prove production runtime or autonomy.
+The details follow after a blank line: starting SHA, branch and PR, files in scope, acceptance criteria and dependencies.
 
-## Permissions and stop conditions
+Rules:
+- An agent uses only task IDs with its own prefix for `OPEN` and `RELEASED`.
+- A task ID is used once. After `RELEASED` or `STALE` it cannot be opened again; new work gets a new ID.
+- An agent holds at most one `OPEN` claim at a time. Agents with separate claims work in parallel; they do not wait for each other.
+- Before editing, an agent checks that no other open claim covers the same branch or files. If two claims overlap, both stop and reconcile in #22.
+- `RELEASED` comes from the owner of the claim when the task is done or dropped.
+- An owner keeps a long task alive with a new `OPEN` comment for the same task, or with a commit on its branch or an update to its PR.
 
-Stop and report when:
-- the exact SHA or relevant CI result cannot be retrieved;
-- a PR's base/head or dependency chain is unclear;
-- two agents have overlapping active work;
-- state is malformed, stale, contradictory, or untrusted;
-- a change affects workflow permissions, repository settings, schema/migrations, runtime execution, or authority boundaries without explicit owner approval.
+`autopoesis/coordination.py` computes the claims from the comments: `python -m autopoesis.coordination facts.json`. Comments in older free-text formats are ignored and never converted.
 
-Never auto-merge, auto-close, force-push, delete data, weaken checks, or commit generated runtime files such as `RESULTS.json` and `TASK_QUEUE.json`.
+## Stale claims
 
-## Ten-minute schedule recommendation
+A claim expires when 24 hours pass with no activity: no new `OPEN` comment from its owner, no commit on its branch and no update to its PR.
 
-Use a 10-minute schedule primarily for **read-only reconciliation**. Permit implementation only when the task is explicitly claimed, bounded, and has no overlapping owner. A scheduler must avoid overlapping runs (concurrency group / no parallel instances), use a finite timeout, and avoid posting duplicate reports. A frequent poll is not proof of successful execution and should not create a new commit when nothing changed.
+- Only another agent may mark a claim stale, and only after it has expired. It posts `Claim: STALE` under the expired task's ID. A mark before expiry is rejected, so running work is never taken over.
+- The agent taking over opens a new task under its own prefix and works on a new branch. It never pushes to the stale branch.
+- The original owner can come back with a new task. The stale claim stays in the history.
 
-## Activation
+## Handoff
 
-This protocol becomes operational only after review and merge of the PR containing it, and after the scheduler is configured to read it. Until then, it is a proposal, not an enforced repository rule.
+A result is handed off with a comment in #22 that starts with `Agent:` and `Task:` and names the exact head SHA, the PR, and the CI run on that SHA. The report format is the one in `AGENTS.md`. A handoff that asks for an audit names the PR and SHA to audit.
+
+## Ready for owner
+
+A PR is ready for the owner only in the state `READY_FOR_OWNER` defined in `AGENTS.md`:
+- there is a valid `Verdict: ACCEPTED` for the PR's current head SHA, posted by an authorized auditor app;
+- CI is green on that same head.
+
+The `ready-for-owner` label marks this state. A new push removes it. The owner is the only merge gate; a ready PR is still merged only by the owner.
+
+## Cadence
+
+Neither agent runs often enough for tight coordination, so nothing in this protocol depends on a fast schedule.
+
+- Claude: a scheduled task every 4 hours, plus runs when the owner writes in the project thread or a subscribed PR changes. The scheduler allows at most hourly runs.
+- GPT: runs when the owner opens a chat with it. GPT reported one daily scheduled automation (Issue #22, comment 6279556894). Whether that automation can read and write GitHub is not verified.
+- A run that finds nothing new posts nothing. There are no heartbeat comments or commits.
+
+## No deadlocks
+
+- A missing audit blocks only the PR waiting for it and the tasks that depend on it. Other tasks continue.
+- An audit pending for more than 7 days becomes `audit-overdue` and goes to the owner (see `AGENTS.md`).
+- The owner can decide any PR at any time. The protocol never makes the owner wait for an agent.

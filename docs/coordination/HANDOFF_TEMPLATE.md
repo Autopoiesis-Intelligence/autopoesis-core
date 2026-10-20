@@ -1,6 +1,6 @@
 # Agent handoff template
 
-Use one copy per meaningful handoff. Keep it compact and evidence-linked.
+A field checklist for the report format in `AGENTS.md`. Use one copy per meaningful handoff in Issue #22, after the `Agent:` and `Task:` lines. Keep it compact and evidence-linked.
 
 ## BEFORE
 - Repository:

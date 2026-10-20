@@ -48,6 +48,7 @@ Proving L1–L2 does not prove L3–L4. The agents' development loop (agents wri
   ```
   Generated `RESULTS.json` and `TASK_QUEUE.json` are run artifacts. Do not commit them.
 - Changes to `.github/workflows/`, permissions, secrets or repository settings need the owner's explicit approval for that change.
+- Claims, handoffs and takeovers between agents follow `docs/coordination/PROTOCOL.md`.
 - Agents do not merge their own PRs. A merge needs green CI on the exact head **and** an independent review, meaning not the author agent.
 
 ## Review and audit
