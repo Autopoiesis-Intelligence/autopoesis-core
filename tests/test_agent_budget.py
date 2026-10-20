@@ -63,6 +63,18 @@ class UnknownAllowanceTests(unittest.TestCase):
         self.assertEqual(decision["used"], 0.0)
         self.assertEqual(decision["reason"], "DAILY_BUDGET_USED")
 
+    def test_exhaustion_with_unresolved_unit_blocks_but_learns_nothing(self):
+        policy = BudgetPolicy()
+        ledger = record(new_ledger(OCT_10, policy), OCT_10, policy, cap=60,
+                        usage={"totalPremiumRequestCost": 1, "totalNanoAiu": 100_000_000})
+        ledger = record(ledger, OCT_10, policy, cap=30, exit_code=1, stderr="monthly credits exhausted")
+        self.assertEqual(ledger["used"], 90.0)
+        self.assertEqual(ledger["block_reason"], "ALLOWANCE_EXHAUSTED")
+        self.assertIsNone(ledger["allowance"])
+        self.assertEqual(ledger["allowance_source"], "unknown")
+        november = datetime(2026, 11, 1, 0, 30, tzinfo=timezone.utc)
+        self.assertEqual(plan(ledger, november, "docs", policy)["reason"], "PROBING_UNKNOWN_ALLOWANCE")
+
     def test_rate_limit_backs_off_exponentially_and_success_clears_it(self):
         policy = BudgetPolicy()
         ledger = new_ledger(OCT_10, policy)

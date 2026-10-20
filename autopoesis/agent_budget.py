@@ -10,7 +10,9 @@ core does not assume one. It learns from its own runs:
 - an "allowance exhausted" error blocks runs until the monthly reset
   (00:00 UTC on the first day of the month) and records the spent amount as
   the observed allowance. That figure misses the owner's own spending, so
-  each new month raises it by a quarter until the next exhaustion corrects it;
+  each new month raises it by a quarter until the next exhaustion corrects it.
+  Nothing is learned while no usage field is trusted, since charged caps are
+  not allowance units;
 - a rate-limit error blocks runs with exponential backoff.
 
 Spending is paced evenly over the days left in the month. The whole
@@ -330,8 +332,9 @@ def record_run(
         outcome = "ALLOWANCE_EXHAUSTED"
         updated["blocked_until"] = next_reset(now).isoformat()
         updated["block_reason"] = outcome
-        if policy.configured_allowance is None and updated["used"] >= 1:
-            # Below one credit the owner must have spent the allowance; nothing is learned.
+        if policy.configured_allowance is None and policy.allowance_unit_field is not None and updated["used"] >= 1:
+            # Charged caps are not allowance units, and below one credit the owner must have
+            # spent the allowance; in both cases nothing is learned.
             updated["allowance"] = updated["used"]
             updated["allowance_source"] = "observed"
     elif _RATE_LIMITED.search(stderr):
