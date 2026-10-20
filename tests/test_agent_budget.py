@@ -51,7 +51,8 @@ class UnknownAllowanceTests(unittest.TestCase):
         ledger = record(ledger, OCT_10, policy, cap=30, exit_code=1,
                         stderr="Error: monthly AI credits allowance exhausted for this plan")
         self.assertEqual(ledger["allowance_source"], "observed")
-        self.assertEqual(ledger["allowance"], 70.0)
+        # The refused run reported nothing, so only the 40 reported credits count.
+        self.assertEqual(ledger["allowance"], 40.0)
         decision = plan(ledger, OCT_10 + timedelta(days=5), "docs", policy)
         self.assertEqual(decision["decision"], "WAIT")
         self.assertEqual(decision["retry_after"], "2026-11-01T00:00:00+00:00")
@@ -59,7 +60,7 @@ class UnknownAllowanceTests(unittest.TestCase):
         # After the reset the block is gone; the learned allowance grows by a quarter and paces spending.
         november = datetime(2026, 11, 1, 0, 30, tzinfo=timezone.utc)
         decision = plan(ledger, november, "docs", policy)
-        self.assertEqual(decision["allowance"], 87.5)
+        self.assertEqual(decision["allowance"], 50.0)
         self.assertEqual(decision["used"], 0.0)
         self.assertEqual(decision["reason"], "DAILY_BUDGET_USED")
 
@@ -74,6 +75,22 @@ class UnknownAllowanceTests(unittest.TestCase):
         self.assertEqual(ledger["allowance_source"], "unknown")
         november = datetime(2026, 11, 1, 0, 30, tzinfo=timezone.utc)
         self.assertEqual(plan(ledger, november, "docs", policy)["reason"], "PROBING_UNKNOWN_ALLOWANCE")
+
+    def test_exhaustion_after_a_cap_charged_run_learns_nothing(self):
+        policy = BudgetPolicy(allowance_unit_field=TRUSTED)
+        ledger = record(new_ledger(OCT_10, policy), OCT_10, policy, cap=60, usage={"totalPremiumRequestCost": 5})
+        ledger = record(ledger, OCT_10, policy, cap=60, usage={"totalNanoAiu": 100_000_000})
+        ledger = record(ledger, OCT_10, policy, cap=30, exit_code=1, stderr="monthly credits exhausted")
+        self.assertEqual(ledger["used"], 95.0)
+        self.assertEqual(ledger["block_reason"], "ALLOWANCE_EXHAUSTED")
+        self.assertIsNone(ledger["allowance"])
+
+    def test_exhaustion_with_trimmed_history_learns_nothing(self):
+        policy = BudgetPolicy(allowance_unit_field=TRUSTED)
+        ledger = record(new_ledger(OCT_10, policy), OCT_10, policy, usage={"totalPremiumRequestCost": 5})
+        ledger["runs"] = []
+        ledger = record(ledger, OCT_10, policy, exit_code=1, stderr="monthly credits exhausted")
+        self.assertIsNone(ledger["allowance"])
 
     def test_rate_limit_backs_off_exponentially_and_success_clears_it(self):
         policy = BudgetPolicy()

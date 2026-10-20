@@ -11,8 +11,8 @@ core does not assume one. It learns from its own runs:
   (00:00 UTC on the first day of the month) and records the spent amount as
   the observed allowance. That figure misses the owner's own spending, so
   each new month raises it by a quarter until the next exhaustion corrects it.
-  Nothing is learned while no usage field is trusted, since charged caps are
-  not allowance units;
+  Nothing is learned if any run of the month was charged a cap, since charged
+  caps are not allowance units;
 - a rate-limit error blocks runs with exponential backoff.
 
 Spending is paced evenly over the days left in the month. The whole
@@ -332,10 +332,10 @@ def record_run(
         outcome = "ALLOWANCE_EXHAUSTED"
         updated["blocked_until"] = next_reset(now).isoformat()
         updated["block_reason"] = outcome
-        if policy.configured_allowance is None and policy.allowance_unit_field is not None and updated["used"] >= 1:
-            # Charged caps are not allowance units, and below one credit the owner must have
-            # spent the allowance; in both cases nothing is learned.
-            updated["allowance"] = updated["used"]
+        learned = _reported_spending(updated, reported, charged)
+        if policy.configured_allowance is None and learned is not None and learned >= 1:
+            # Below one credit the owner must have spent the allowance; nothing is learned.
+            updated["allowance"] = learned
             updated["allowance_source"] = "observed"
     elif _RATE_LIMITED.search(stderr):
         outcome = "RATE_LIMITED"
@@ -365,6 +365,20 @@ def record_run(
 # observed in run 39346008076, with the factor that turns each into a plain number.
 # Every other field (limits, balances, per-model copies) is ignored.
 USAGE_FIELDS = {"totalPremiumRequestCost": 1, "totalNanoAiu": 1_000_000_000}
+
+
+def _reported_spending(ledger: dict[str, Any], reported: float | None, charged: float) -> float | None:
+    """Return this period's spending in allowance units, or None if any earlier run was charged a cap.
+
+    The refused run itself may lack a report; it adds only what it reported. A ledger
+    whose runs no longer add up to ``used`` (trimmed history) yields None.
+    """
+    runs = ledger["runs"]
+    if any(run.get("reported") is None for run in runs):
+        return None
+    if not math.isclose(sum(run["charged"] for run in runs) + charged, ledger["used"], abs_tol=1e-6):
+        return None
+    return round(sum(run["reported"] for run in runs) + (reported or 0.0), 6)
 
 
 def usage_readings(usage: Any) -> dict[str, float | None]:
