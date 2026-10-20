@@ -133,11 +133,17 @@ def _validate_history(history: list[Any]) -> None:
 
 def load_queue(path: Path) -> dict[str, Any]:
     """Load and validate a queue; a missing file means an empty queue."""
-    if not path.exists():
-        return empty_queue()
     try:
-        queue = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raw_queue = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # Only a genuinely absent file represents a first-run empty queue.
+        return empty_queue()
+    except (OSError, UnicodeError) as exc:
+        raise EvolutionError(f"Cannot read task queue: {exc}") from exc
+
+    try:
+        queue = json.loads(raw_queue)
+    except json.JSONDecodeError as exc:
         raise EvolutionError(f"Cannot read task queue: {exc}") from exc
     if (
         not isinstance(queue, dict)
