@@ -49,7 +49,7 @@ Rules:
 - `RELEASED` comes from the owner of the claim when the task is done or dropped.
 - An owner keeps a long task alive with a new `OPEN` comment for the same task, or with a commit on its branch or an update to its PR.
 
-`autopoesis/coordination.py` computes the claims from the comments: `python -m autopoesis.coordination facts.json`. Comments in older free-text formats are ignored and never converted.
+`autopoesis/coordination.py` computes the claims from the comments. The exact command for a scheduled run is in `SCHEDULER_PROMPT.md`. Comments in older free-text formats are ignored and never converted.
 
 ## Stale claims
 

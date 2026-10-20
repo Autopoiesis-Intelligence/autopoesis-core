@@ -149,12 +149,30 @@ def coordination_state(
     return {"claims": result, "decisions": decisions}
 
 
+def load_facts(raw: Any) -> dict[str, Any]:
+    """Accept a facts object, a list of comments, or the page list of ``gh api --paginate --slurp``."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list):
+        if raw and all(isinstance(page, list) for page in raw):
+            raw = [comment for page in raw for comment in page]
+        return {"comments": raw}
+    raise ValueError("input must be a JSON object with 'comments' or a JSON list of comments")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Compute task claims from coordination issue comments.")
-    parser.add_argument("input", help="JSON file: comments (GitHub issue comments), optional activity, optional now")
+    parser.add_argument(
+        "input",
+        help="JSON file, or - for stdin: a list of GitHub issue comments, the pages from "
+        "`gh api --paginate --slurp`, or an object with comments, optional activity and optional now",
+    )
     args = parser.parse_args(argv)
-    with open(args.input, encoding="utf-8") as handle:
-        facts = json.load(handle)
+    if args.input == "-":
+        facts = load_facts(json.load(sys.stdin))
+    else:
+        with open(args.input, encoding="utf-8") as handle:
+            facts = load_facts(json.load(handle))
     now = _parse_time(facts["now"]) if "now" in facts else datetime.now(timezone.utc)
     state = coordination_state(facts["comments"], now=now, activity=facts.get("activity"))
     json.dump(state, sys.stdout, indent=2, sort_keys=True)

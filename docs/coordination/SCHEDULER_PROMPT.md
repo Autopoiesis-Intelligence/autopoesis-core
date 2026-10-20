@@ -5,7 +5,13 @@ The live prompt is stored in Claude's scheduled task "autopoiesis-core dev loop"
 On each run:
 
 1. Make one cheap check first: the `main` SHA, open PRs with their head SHAs, and the newest comment in Issue #22. If nothing changed and nothing is due, post nothing and stop.
-2. Compute the claims in #22 with `python -m autopoesis.coordination`. Do not start work that overlaps another agent's open claim.
+2. Compute the claims in #22 from a checkout of `main`, with exactly this command:
+
+   ```bash
+   gh api --paginate --slurp "repos/Autopoiesis-Intelligence/autopoiesis-core/issues/22/comments?per_page=100" | python -m autopoesis.coordination -
+   ```
+
+   It prints the claims as JSON. Do not start work that overlaps another agent's open claim. If the command fails, stop: claims are unknown, not empty.
 3. Before editing, post a claim block (`Agent: Claude`, `Task: CL-…`, `Claim: OPEN`) with the starting SHA, branch, files in scope and acceptance criteria.
 4. Work on a `claude/` branch and a PR. Re-check the branch head right before writing.
 5. Record the exact head SHA and the CI run on that SHA. A queued run is not a pass.

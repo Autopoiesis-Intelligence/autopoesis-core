@@ -173,6 +173,28 @@ class RobustnessTests(unittest.TestCase):
 
 
 class CommandLineTests(unittest.TestCase):
+    def documented_command(self):
+        prompt = (Path(__file__).resolve().parent.parent / "docs" / "coordination" / "SCHEDULER_PROMPT.md").read_text(
+            encoding="utf-8")
+        lines = [line.strip() for line in prompt.splitlines() if "autopoesis.coordination" in line and "|" in line]
+        self.assertEqual(len(lines), 1, "the scheduler prompt must give exactly one claim-check command")
+        return lines[0]
+
+    def test_scheduler_prompt_command_runs_on_slurped_pages(self):
+        """The command in SCHEDULER_PROMPT.md, fed what `gh api --paginate --slurp` prints, must work."""
+        source, checker = (part.strip() for part in self.documented_command().split("|"))
+        self.assertTrue(source.startswith("gh api --paginate --slurp "))
+        self.assertIn("/issues/22/comments", source)
+        self.assertEqual(checker, "python -m autopoesis.coordination -")
+        pages = [[claim(1, "Claude", "CL-009", "OPEN", 0)], [claim(2, "Claude", "CL-009", "RELEASED", 1)]]
+        out = subprocess.run([sys.executable, "-m", "autopoesis.coordination", "-"], input=json.dumps(pages),
+                             check=True, capture_output=True, text=True).stdout
+        self.assertEqual(json.loads(out)["claims"]["CL-009"]["status"], "RELEASED")
+
+    def test_command_line_without_input_fails(self):
+        result = subprocess.run([sys.executable, "-m", "autopoesis.coordination"], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+
     def test_command_line_prints_the_same_state(self):
         comments = [claim(1, "Claude", "CL-009", "OPEN", 0)]
         with tempfile.TemporaryDirectory() as tmp:
