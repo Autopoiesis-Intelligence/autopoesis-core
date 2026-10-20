@@ -22,9 +22,6 @@ permissions:
   actions: read
   contents: read
 
-permissions:
-  contents: read
-
 jobs:
   test:
     runs-on: ubuntu-latest
