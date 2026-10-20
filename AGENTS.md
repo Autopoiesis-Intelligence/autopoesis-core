@@ -50,6 +50,48 @@ Proving L1–L2 does not prove L3–L4. The agents' development loop (agents wri
 - Changes to `.github/workflows/`, permissions, secrets or repository settings need the owner's explicit approval for that change.
 - Agents do not merge their own PRs. A merge needs green CI on the exact head **and** an independent review, meaning not the author agent.
 
+## Review and audit
+
+An audit is an independent review of one exact head SHA. CI does not replace it, and it does not replace CI.
+
+**Verdict format.** An auditor posts a PR comment whose body starts with this block. An `Agent:` line may come first.
+
+```
+Verdict: ACCEPTED | REJECTED
+pr: <PR number>
+head_sha: <40-character SHA of the PR head that was audited>
+```
+
+Reasons follow after a blank line. A verdict counts only when all of these hold:
+- the block opens the comment;
+- `pr` is this PR;
+- `head_sha` is the PR's current head;
+- GitHub's `performed_via_github_app` has the id and slug of an authorized auditor app (today id `1144995`, slug `chatgpt-codex-connector`, the ChatGPT Codex Connector). The display name is not checked.
+
+The `Agent:` text line identifies the writer, but it is not proof of authorship. A verdict that fails any check is ignored and does not change the PR's state.
+
+**Labels and transitions.** The state is recomputed from all comments on every check. A repeated or late event therefore changes nothing.
+
+| State | Labels | When |
+|---|---|---|
+| Pending audit | `pending-audit` | no valid verdict for the current head |
+| Blocked review | `blocked-review` | the newest valid verdict for the current head is `REJECTED` |
+| Ready for owner | `ready-for-owner` | the newest valid verdict for the current head is `ACCEPTED` and CI is green on that head |
+| Accepted, CI not green | none of these labels | the newest valid verdict is `ACCEPTED`, but CI on that head is missing or red |
+| Audit overdue | `pending-audit`, `audit-overdue` | still pending more than 7 days after the current head was committed |
+
+- A new push changes the head, so every earlier verdict becomes stale: `ready-for-owner` and `blocked-review` are removed and the PR returns to `pending-audit`.
+- A rejected PR comes back only as a new head with a new audit. The old verdict stays in the history.
+- `ready-for-owner` never authorizes a merge by itself. Only the owner merges.
+
+**Overdue notification.** When `notify_owner` is true, the Claude development loop sends the owner one message in the project thread through `apply_audit_result`. Only after that message is sent does it add `audit-overdue`. The label records that the notification went out, so later checks see it and do not notify again. The label on its own is not a notification. Without the loop, nobody is notified.
+
+The order is deliberate. If the loop stops between sending the message and adding the label, the next check sends the message again. A failure can therefore duplicate a notification but can never lose it. The opposite order (label first) would turn a failed send into a silent miss. Delivery is at least once, not exactly once.
+
+**Enforcement.** `autopoesis/audit_verdict.py` computes the state and the label changes from the PR facts and comments. It makes no network calls. Today the Claude development loop applies the result. Until real GitHub events have been observed end to end, audit state is checked by an agent, not automated by the repository.
+
+**No retroactive verdicts.** Free-text audits posted before this format, for example in Issue #22, are not verdicts. They are never converted, and they authorize nothing.
+
 ## Report format
 
 End each unit of work with:
