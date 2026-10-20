@@ -9,13 +9,13 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from autopoesis.audit_verdict import evaluate_pr_audit, parse_verdict
+from autopoesis.audit_verdict import apply_audit_result, evaluate_pr_audit, parse_verdict
 
 HEAD_A = "a" * 40
 HEAD_B = "b" * 40
 PUSHED = "2026-10-20T12:00:00Z"
 SOON = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
-GPT = {"name": "ChatGPT Codex Connector"}
+GPT = {"id": 1144995, "slug": "chatgpt-codex-connector", "name": "ChatGPT Codex Connector"}
 
 
 def verdict_comment(comment_id, verdict="ACCEPTED", pr=29, sha=HEAD_A, app=GPT, created="2026-10-20T13:00:00Z"):
@@ -106,7 +106,15 @@ class AuditStateTests(unittest.TestCase):
         self.assertEqual(result["state"], "PENDING_AUDIT")
 
     def test_wrong_author_is_rejected_even_with_a_matching_agent_line(self):
-        for label, app in (("Claude app", {"name": "Claude"}), ("no app", None), ("malformed", "ChatGPT")):
+        cases = (
+            ("Claude app", {"id": 1236702, "slug": "claude", "name": "Claude"}),
+            ("right name, wrong app id", {"id": 999, "slug": "chatgpt-codex-connector", "name": "ChatGPT Codex Connector"}),
+            ("right id, wrong slug", {"id": 1144995, "slug": "other", "name": "ChatGPT Codex Connector"}),
+            ("name only", {"name": "ChatGPT Codex Connector"}),
+            ("no app", None),
+            ("malformed", "ChatGPT"),
+        )
+        for label, app in cases:
             with self.subTest(author=label):
                 result = evaluate([verdict_comment(10, app=app)])
                 self.assertEqual(result["state"], "PENDING_AUDIT")
@@ -194,6 +202,80 @@ class AuditStateTests(unittest.TestCase):
 
         self.assertEqual(json.loads(output)["state"], "READY_FOR_OWNER")
 
+
+
+class FakeGitHub:
+    """Records label writes and owner messages; can fail on a chosen call."""
+
+    def __init__(self, labels=(), fail_notify=False, fail_overdue_label=False):
+        self.labels = set(labels)
+        self.messages = []
+        self.fail_notify = fail_notify
+        self.fail_overdue_label = fail_overdue_label
+
+    def notify(self, text):
+        if self.fail_notify:
+            raise OSError("message not delivered")
+        self.messages.append(text)
+
+    def add(self, labels):
+        if self.fail_overdue_label and "audit-overdue" in labels:
+            raise OSError("label write failed")
+        self.labels |= set(labels)
+
+    def remove(self, labels):
+        self.labels -= set(labels)
+
+    def check(self, now):
+        result = evaluate([], labels=sorted(self.labels), now=now)
+        return apply_audit_result(result, notify_owner=self.notify, add_labels=self.add, remove_labels=self.remove)
+
+
+class ApplyAuditResultTests(unittest.TestCase):
+    LATE = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+
+    def test_overdue_sends_one_message_then_adds_the_label(self):
+        github = FakeGitHub(labels=["pending-audit"])
+
+        actions = github.check(self.LATE)
+        repeat = github.check(self.LATE + timedelta(hours=4))
+
+        self.assertEqual(actions, ["notify", "add:audit-overdue"])
+        self.assertEqual(repeat, [])
+        self.assertEqual(len(github.messages), 1)
+        self.assertEqual(github.labels, {"pending-audit", "audit-overdue"})
+
+    def test_failed_send_adds_no_label_and_the_next_check_retries(self):
+        github = FakeGitHub(labels=["pending-audit"], fail_notify=True)
+
+        with self.assertRaises(OSError):
+            github.check(self.LATE)
+        self.assertNotIn("audit-overdue", github.labels)
+
+        github.fail_notify = False
+        github.check(self.LATE + timedelta(hours=4))
+        self.assertEqual(len(github.messages), 1)
+        self.assertIn("audit-overdue", github.labels)
+
+    def test_label_failure_after_send_duplicates_but_never_loses_the_message(self):
+        github = FakeGitHub(labels=["pending-audit"], fail_overdue_label=True)
+
+        with self.assertRaises(OSError):
+            github.check(self.LATE)
+        github.fail_overdue_label = False
+        github.check(self.LATE + timedelta(hours=4))
+        final = github.check(self.LATE + timedelta(hours=8))
+
+        self.assertEqual(len(github.messages), 2)
+        self.assertEqual(final, [])
+
+    def test_label_changes_are_applied_without_a_message_when_not_overdue(self):
+        github = FakeGitHub(labels=["ready-for-owner"])
+
+        actions = github.check(SOON)
+
+        self.assertEqual(actions, ["remove:ready-for-owner", "add:pending-audit"])
+        self.assertEqual(github.messages, [])
 
 if __name__ == "__main__":
     unittest.main()

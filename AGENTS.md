@@ -66,7 +66,7 @@ Reasons follow after a blank line. A verdict counts only when all of these hold:
 - the block opens the comment;
 - `pr` is this PR;
 - `head_sha` is the PR's current head;
-- GitHub's `performed_via_github_app` names an authorized auditor app (today `ChatGPT Codex Connector`).
+- GitHub's `performed_via_github_app` has the id and slug of an authorized auditor app (today id `1144995`, slug `chatgpt-codex-connector`, the ChatGPT Codex Connector). The display name is not checked.
 
 The `Agent:` text line identifies the writer, but it is not proof of authorship. A verdict that fails any check is ignored and does not change the PR's state.
 
@@ -84,7 +84,7 @@ The `Agent:` text line identifies the writer, but it is not proof of authorship.
 - A rejected PR comes back only as a new head with a new audit. The old verdict stays in the history.
 - `ready-for-owner` never authorizes a merge by itself. Only the owner merges.
 
-**Overdue notification.** When `notify_owner` is true, the Claude development loop sends the owner one message in the project thread. Only after that message is sent does it add `audit-overdue`. The label records that the notification went out, so later checks see it and do not notify again. The label on its own is not a notification. Without the loop, nobody is notified.
+**Overdue notification.** When `notify_owner` is true, the Claude development loop sends the owner one message in the project thread through `apply_audit_result`. Only after that message is sent does it add `audit-overdue`. The label records that the notification went out, so later checks see it and do not notify again. The label on its own is not a notification. Without the loop, nobody is notified.
 
 The order is deliberate. If the loop stops between sending the message and adding the label, the next check sends the message again. A failure can therefore duplicate a notification but can never lose it. The opposite order (label first) would turn a failed send into a silent miss. Delivery is at least once, not exactly once.
 

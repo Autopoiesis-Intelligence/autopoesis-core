@@ -19,9 +19,10 @@ import json
 import re
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
-AUTHORIZED_AUDITOR_APPS = frozenset({"ChatGPT Codex Connector"})
+# GitHub App id -> slug of each authorized auditor. The display name is not checked: it can change.
+AUTHORIZED_AUDITOR_APPS = {1144995: "chatgpt-codex-connector"}
 AUDIT_DEADLINE = timedelta(days=7)
 VERDICTS = frozenset({"ACCEPTED", "REJECTED"})
 
@@ -57,7 +58,11 @@ def classify_comment(comment: dict[str, Any], *, pr_number: int, head_sha: str) 
     if parsed is None:
         return "NOT_A_VERDICT"
     app = comment.get("performed_via_github_app")
-    if not isinstance(app, dict) or app.get("name") not in AUTHORIZED_AUDITOR_APPS:
+    if (
+        not isinstance(app, dict)
+        or type(app.get("id")) is not int
+        or AUTHORIZED_AUDITOR_APPS.get(app["id"]) != app.get("slug")
+    ):
         return "UNAUTHORIZED"
     if parsed["pr"] != pr_number:
         return "WRONG_PR"
@@ -124,6 +129,39 @@ def evaluate_pr_audit(
         "notify_owner": state == "AUDIT_OVERDUE" and LABEL_OVERDUE not in current,
         "decisions": decisions,
     }
+
+
+def apply_audit_result(
+    result: dict[str, Any],
+    *,
+    notify_owner: Callable[[str], None],
+    add_labels: Callable[[list[str]], None],
+    remove_labels: Callable[[list[str]], None],
+) -> list[str]:
+    """Apply the label changes, sending the overdue notification before its label.
+
+    ``audit-overdue`` is added only after ``notify_owner`` returns. If sending
+    fails, the label is not added and the next check notifies again. If the
+    label write fails after a successful send, the next check also notifies
+    again. Delivery is therefore at least once, never silently lost.
+    """
+    actions = []
+    if result["remove_labels"]:
+        remove_labels(result["remove_labels"])
+        actions.append("remove:" + ",".join(result["remove_labels"]))
+    other = [label for label in result["add_labels"] if label != LABEL_OVERDUE]
+    if other:
+        add_labels(other)
+        actions.append("add:" + ",".join(other))
+    if result["notify_owner"]:
+        notify_owner(
+            f"PR #{result['pr']}: no valid audit for head {result['head_sha']} "
+            f"after {AUDIT_DEADLINE.days} days."
+        )
+        actions.append("notify")
+        add_labels([LABEL_OVERDUE])
+        actions.append("add:" + LABEL_OVERDUE)
+    return actions
 
 
 def _parse_time(value: Any) -> datetime:
