@@ -1,0 +1,105 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from autopoesis.task_queue import (
+    MAX_ATTEMPTS,
+    advance_task,
+    empty_queue,
+    load_queue,
+    merge_candidates,
+    select_next_task,
+    select_next_task_file,
+    update_queue_file,
+)
+from run_tasks import run
+
+
+def candidate(task_id, **extra):
+    return {"id": task_id, "type": "proposal", "source": "autopoesis/x.py", "evidence": "missing test", **extra}
+
+
+def queue_of(*candidates):
+    return merge_candidates(empty_queue(), list(candidates))["queue"]
+
+
+class TaskSelectionTests(unittest.TestCase):
+    def test_empty_queue_selects_nothing(self):
+        self.assertEqual(
+            select_next_task(empty_queue()),
+            {"selected": None, "reason": "no eligible OPEN candidates", "deferred": []},
+        )
+
+    def test_selection_is_deterministic_and_independent_of_item_order(self):
+        items = [candidate("B"), candidate("A"), candidate("C")]
+        first = select_next_task(queue_of(*items))
+        second = select_next_task(queue_of(*reversed(items)))
+        self.assertEqual(first, second)
+        self.assertEqual(first["selected"], "A")
+        self.assertEqual([d["id"] for d in first["deferred"]], ["B", "C"])
+
+    def test_priority_then_fewest_attempts_then_id(self):
+        queue = queue_of(candidate("A"), candidate("B", priority=2), candidate("C", priority=2))
+        self.assertEqual(select_next_task(queue)["selected"], "B")
+        queue = advance_task(queue, "B", "SELECTED")["queue"]
+        queue = advance_task(queue, "B", "IN_PROGRESS")["queue"]
+        queue = advance_task(queue, "B", "OPEN")["queue"]
+        self.assertEqual(select_next_task(queue)["selected"], "C")
+
+    def test_non_integer_priority_counts_as_zero(self):
+        queue = queue_of(candidate("A"), candidate("B", priority="9"), candidate("C", priority=True))
+        self.assertEqual(select_next_task(queue)["selected"], "A")
+
+    def test_insufficient_evidence_and_attempt_limit_are_deferred_with_reasons(self):
+        queue = queue_of({"id": "NOEVIDENCE", "type": "proposal", "source": "x.py"}, candidate("TIRED"))
+        for _ in range(MAX_ATTEMPTS):
+            for status in ("SELECTED", "IN_PROGRESS", "OPEN"):
+                queue = advance_task(queue, "TIRED", status)["queue"]
+        result = select_next_task(queue)
+        self.assertIsNone(result["selected"])
+        self.assertEqual(result["deferred"], [
+            {"id": "NOEVIDENCE", "reason": "insufficient evidence: needs source and evidence"},
+            {"id": "TIRED", "reason": "attempt limit reached"},
+        ])
+
+    def test_active_work_blocks_a_second_selection(self):
+        queue = advance_task(queue_of(candidate("A"), candidate("B")), "B", "SELECTED")["queue"]
+        result = select_next_task(queue)
+        self.assertIsNone(result["selected"])
+        self.assertEqual(result["reason"], "work already active: B")
+
+    def test_terminal_items_are_not_candidates(self):
+        queue = advance_task(queue_of(candidate("A")), "A", "REJECTED")["queue"]
+        self.assertIsNone(select_next_task(queue)["selected"])
+
+    def test_file_selection_persists_once_and_no_work_leaves_file_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [candidate("A"), candidate("B")])
+            self.assertEqual(select_next_task_file(path)["selected"], "A")
+            queue = load_queue(path)
+            self.assertEqual({i["id"]: i["status"] for i in queue["items"]}, {"A": "SELECTED", "B": "OPEN"})
+            self.assertTrue(queue["history"][-1]["note"].startswith("selected: "))
+            before = path.read_bytes()
+            self.assertIsNone(select_next_task_file(path)["selected"])
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_runner_task_reports_selection_without_manufacturing_progress(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            queue_path, tasks_path, results_path = root / "Q.json", root / "T.json", root / "R.json"
+            tasks_path.write_text(json.dumps({"tasks": [{"id": "pick", "type": "select_next_task"}]}), encoding="utf-8")
+            self.assertEqual(run(tasks_path, results_path, queue_path), 0)
+            result = json.loads(results_path.read_text(encoding="utf-8"))["tasks"][0]["result"]
+            self.assertIsNone(result["selected"])
+            self.assertFalse(queue_path.exists())
+            update_queue_file(queue_path, [candidate("A")])
+            self.assertEqual(run(tasks_path, results_path, queue_path), 0)
+            result = json.loads(results_path.read_text(encoding="utf-8"))["tasks"][0]["result"]
+            self.assertEqual(result["selected"], "A")
+            self.assertEqual(load_queue(queue_path)["items"][0]["status"], "SELECTED")
+
+
+if __name__ == "__main__":
+    unittest.main()

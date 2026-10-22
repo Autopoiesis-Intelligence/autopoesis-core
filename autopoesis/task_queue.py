@@ -318,6 +318,52 @@ def advance_task(queue: dict[str, Any], task_id: str, status: str, note: str = "
     return {"queue": record_outcome(queue, task_id, status, note), "changed": True}
 
 
+def select_next_task(queue: dict[str, Any]) -> dict[str, Any]:
+    """Deterministically choose one OPEN item and explain every deferral; never mutates."""
+    items = sorted(queue.get("items", []), key=lambda item: item["id"])
+    active = [item["id"] for item in items if item.get("status") in {"SELECTED", "IN_PROGRESS"}]
+    if active:
+        return {"selected": None, "reason": f"work already active: {', '.join(active)}", "deferred": []}
+    eligible: list[dict[str, Any]] = []
+    deferred: list[dict[str, str]] = []
+    for item in items:
+        if item.get("status") != "OPEN":
+            continue
+        if item.get("attempts", 0) >= MAX_ATTEMPTS:
+            deferred.append({"id": item["id"], "reason": "attempt limit reached"})
+        elif not all(isinstance(item.get(key), str) and item[key].strip() for key in ("source", "evidence")):
+            deferred.append({"id": item["id"], "reason": "insufficient evidence: needs source and evidence"})
+        else:
+            eligible.append(item)
+    if not eligible:
+        return {"selected": None, "reason": "no eligible OPEN candidates", "deferred": deferred}
+
+    def rank(item: dict[str, Any]) -> tuple[int, int, str]:
+        priority = item.get("priority", 0)
+        return (-(priority if type(priority) is int else 0), item.get("attempts", 0), item["id"])
+
+    chosen = min(eligible, key=rank)
+    for item in eligible:
+        if item is not chosen:
+            deferred.append({"id": item["id"], "reason": f"ranked below {chosen['id']}"})
+    reason = (
+        f"highest priority {chosen.get('priority', 0)}, fewest attempts {chosen.get('attempts', 0)}, "
+        f"then lowest id among {len(eligible)} eligible"
+    )
+    return {"selected": chosen["id"], "reason": reason, "deferred": sorted(deferred, key=lambda d: d["id"])}
+
+
+def select_next_task_file(path: Path) -> dict[str, Any]:
+    """Select the next task and persist OPEN -> SELECTED; no eligible work leaves the file untouched."""
+    with queue_write_lock(path):
+        queue = load_queue(path)
+        selection = select_next_task(queue)
+        if selection["selected"] is not None:
+            result = advance_task(queue, selection["selected"], "SELECTED", f"selected: {selection['reason']}")
+            _write_queue_atomically(path, result["queue"])
+    return {**selection, "path": path.as_posix()}
+
+
 def record_verification_file(
     path: Path,
     task_id: str,
