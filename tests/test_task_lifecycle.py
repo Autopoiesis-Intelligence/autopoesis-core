@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -158,6 +161,52 @@ class TaskLifecycleTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("Illegal transition", results["tasks"][0]["error"])
             self.assertEqual(load_queue(queue_path)["items"][0]["status"], "DONE")
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def workflow_seed_script():
+    """Return the Python body of the CI seed probe step, exactly as the workflow runs it."""
+    lines = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8").splitlines()
+    start = lines.index("      - name: Seed synthetic DONE probe for cross-run verification")
+    begin = next(i for i in range(start, len(lines)) if lines[i].strip() == "python - <<'PY'")
+    end = next(i for i in range(begin + 1, len(lines)) if lines[i].strip() == "PY")
+    return "\n".join(line[10:] for line in lines[begin + 1:end]) + "\n"
+
+
+class WorkflowSeedProbeTests(unittest.TestCase):
+    def test_seed_probe_uses_only_the_governed_lifecycle(self):
+        script = workflow_seed_script()
+        self.assertNotIn("record_outcome", script)
+        self.assertIn("advance_task_file", script)
+
+    def test_seed_probe_reaches_done_through_verified_transitions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = {**os.environ, "PYTHONPATH": str(ROOT)}
+            completed = subprocess.run(
+                [sys.executable, "-c", workflow_seed_script()],
+                cwd=directory, env=env, capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            queue = load_queue(Path(directory) / "TASK_QUEUE.json")
+        probe = next(item for item in queue["items"] if item["id"] == "CI-RESTORE-DONE-PROBE")
+        self.assertEqual(probe["status"], "DONE")
+        self.assertEqual(probe["attempts"], 1)
+        steps = [
+            (event["event"], event.get("to") or event.get("verification_status"))
+            for event in queue["history"] if event["task_id"] == "CI-RESTORE-DONE-PROBE"
+        ]
+        self.assertEqual(steps, [
+            ("CANDIDATE_ADDED", None),
+            ("STATUS_CHANGED", "SELECTED"),
+            ("STATUS_CHANGED", "IN_PROGRESS"),
+            ("VERIFICATION_RECORDED", "PASS"),
+            ("STATUS_CHANGED", "DONE"),
+        ])
+        self.assertTrue(any(
+            event.get("task_id") == "CI-RESTORE-VERIFICATION-PROBE" for event in queue["history"]
+        ))
 
 
 if __name__ == "__main__":
