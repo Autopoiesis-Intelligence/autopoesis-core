@@ -239,8 +239,8 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from autopoesis.task_queue import (
+              advance_task_file,
               update_queue_file,
-              record_outcome_file,
               record_verification_file,
           )
 
@@ -253,12 +253,12 @@ jobs:
               "description": "Synthetic verification item; not a production task.",
           }
           update_queue_file(queue_path, [probe])
-          record_outcome_file(
-              queue_path,
-              probe["id"],
-              "DONE",
-              "synthetic CI fixture for cross-run restore verification",
-          )
+          note = "synthetic CI fixture for cross-run restore verification"
+          # Walk the governed lifecycle: DONE is accepted only after a PASS since IN_PROGRESS.
+          advance_task_file(queue_path, probe["id"], "SELECTED", note)
+          advance_task_file(queue_path, probe["id"], "IN_PROGRESS", note)
+          record_verification_file(queue_path, probe["id"], "PASS", "CI_SYNTHETIC_PERSISTENCE_PROBE")
+          advance_task_file(queue_path, probe["id"], "DONE", note)
           record_verification_file(
               queue_path,
               "CI-RESTORE-VERIFICATION-PROBE",
