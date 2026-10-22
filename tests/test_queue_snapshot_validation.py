@@ -14,7 +14,7 @@ from autopoesis.queue_snapshot import (
     validate_queue_snapshot,
     validate_restore_source_run,
 )
-from autopoesis.task_queue import load_queue, update_queue_file
+from autopoesis.task_queue import load_queue, record_verification_file, update_queue_file
 from run_tasks import run
 
 
@@ -118,14 +118,20 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             }
             update_queue_file(queue_path, [candidate])
 
-            tasks_path.write_text(json.dumps({"tasks": [{
-                "id": "set-status",
-                "type": "update_task_status",
-                "task_id": candidate["id"],
-                "status": "DONE",
-                "note": "first invocation",
-            }]}), encoding="utf-8")
-            self.assertEqual(run(tasks_path, results_path, queue_path), 0)
+            def set_status(status):
+                tasks_path.write_text(json.dumps({"tasks": [{
+                    "id": f"set-{status}",
+                    "type": "update_task_status",
+                    "task_id": candidate["id"],
+                    "status": status,
+                    "note": "first invocation",
+                }]}), encoding="utf-8")
+                self.assertEqual(run(tasks_path, results_path, queue_path), 0)
+
+            set_status("SELECTED")
+            set_status("IN_PROGRESS")
+            record_verification_file(queue_path, candidate["id"], "PASS", "UNIT_TEST_FIXTURE")
+            set_status("DONE")
             after_first_run = load_queue(queue_path)
             prior_history = list(after_first_run["history"])
             self.assertEqual(after_first_run["items"][0]["status"], "DONE")

@@ -1,0 +1,164 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from autopoesis.core import EvolutionError
+from autopoesis.task_queue import (
+    ALLOWED_TRANSITIONS,
+    MAX_ATTEMPTS,
+    QUEUE_STATUSES,
+    advance_task,
+    advance_task_file,
+    load_queue,
+    merge_candidates,
+    empty_queue,
+    record_verification_file,
+    update_queue_file,
+)
+from run_tasks import run
+
+
+def fresh_queue():
+    return merge_candidates(empty_queue(), [{"id": "TASK-1", "type": "proposal"}])["queue"]
+
+
+def advance(queue, *statuses):
+    for status in statuses:
+        queue = advance_task(queue, "TASK-1", status)["queue"]
+    return queue
+
+
+def with_verification(queue, status):
+    queue = json.loads(json.dumps(queue))
+    queue["history"].append({
+        "event": "VERIFICATION_RECORDED",
+        "task_id": "TASK-1",
+        "verification_status": status,
+        "verification_level": "UNIT_TEST_FIXTURE",
+        "artifact_sha256": None,
+        "at": "2999-01-01T00:00:00+00:00",
+    })
+    return queue
+
+
+class TaskLifecycleTests(unittest.TestCase):
+    def test_table_covers_every_status_and_terminal_states_have_no_exit(self):
+        self.assertEqual(set(ALLOWED_TRANSITIONS), QUEUE_STATUSES)
+        for targets in ALLOWED_TRANSITIONS.values():
+            self.assertLessEqual(targets, QUEUE_STATUSES)
+        self.assertEqual(ALLOWED_TRANSITIONS["DONE"], frozenset())
+        self.assertEqual(ALLOWED_TRANSITIONS["REJECTED"], frozenset())
+
+    def test_every_transition_outside_the_table_is_rejected(self):
+        paths = {
+            "OPEN": (),
+            "SELECTED": ("SELECTED",),
+            "IN_PROGRESS": ("SELECTED", "IN_PROGRESS"),
+            "REJECTED": ("REJECTED",),
+        }
+        for source, path in paths.items():
+            queue = advance(fresh_queue(), *path)
+            for target in QUEUE_STATUSES - ALLOWED_TRANSITIONS[source] - {source}:
+                with self.subTest(source=source, target=target):
+                    with self.assertRaisesRegex(EvolutionError, "Illegal transition"):
+                        advance_task(queue, "TASK-1", target)
+
+    def test_done_cannot_be_reopened(self):
+        queue = with_verification(advance(fresh_queue(), "SELECTED", "IN_PROGRESS"), "PASS")
+        queue = advance(queue, "DONE")
+        for target in QUEUE_STATUSES - {"DONE"}:
+            with self.assertRaisesRegex(EvolutionError, "Illegal transition"):
+                advance_task(queue, "TASK-1", target)
+
+    def test_repeated_transition_is_an_idempotent_no_op(self):
+        queue = advance(fresh_queue(), "SELECTED")
+        result = advance_task(queue, "TASK-1", "SELECTED")
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["queue"], queue)
+
+    def test_done_requires_pass_verification_after_latest_attempt(self):
+        in_progress = advance(fresh_queue(), "SELECTED", "IN_PROGRESS")
+        with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
+            advance_task(in_progress, "TASK-1", "DONE")
+        with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
+            advance_task(with_verification(in_progress, "FAIL"), "TASK-1", "DONE")
+        with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
+            advance_task(with_verification(with_verification(in_progress, "PASS"), "FAIL"), "TASK-1", "DONE")
+        done = advance(with_verification(in_progress, "PASS"), "DONE")
+        self.assertEqual(done["items"][0]["status"], "DONE")
+
+    def test_pass_from_an_earlier_attempt_does_not_count_after_retry(self):
+        queue = with_verification(advance(fresh_queue(), "SELECTED", "IN_PROGRESS"), "PASS")
+        queue = advance(queue, "OPEN", "SELECTED", "IN_PROGRESS")
+        with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
+            advance_task(queue, "TASK-1", "DONE")
+
+    def test_attempt_limit_stops_retries_but_allows_rejection(self):
+        queue = fresh_queue()
+        for _ in range(MAX_ATTEMPTS):
+            queue = advance(queue, "SELECTED", "IN_PROGRESS", "OPEN")
+        self.assertEqual(queue["items"][0]["attempts"], MAX_ATTEMPTS)
+        queue = advance(queue, "SELECTED")
+        with self.assertRaisesRegex(EvolutionError, "attempt limit"):
+            advance_task(queue, "TASK-1", "IN_PROGRESS")
+        self.assertEqual(advance(queue, "REJECTED")["items"][0]["status"], "REJECTED")
+
+    def test_unknown_task_and_status_are_rejected(self):
+        with self.assertRaises(EvolutionError):
+            advance_task(fresh_queue(), "MISSING", "SELECTED")
+        with self.assertRaises(EvolutionError):
+            advance_task(fresh_queue(), "TASK-1", "FINISHED")
+
+    def test_file_no_op_and_rejection_leave_the_file_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{"id": "TASK-1", "type": "proposal"}])
+            advance_task_file(path, "TASK-1", "SELECTED")
+            before = path.read_bytes()
+            self.assertFalse(advance_task_file(path, "TASK-1", "SELECTED")["changed"])
+            with self.assertRaises(EvolutionError):
+                advance_task_file(path, "TASK-1", "DONE")
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_runner_completes_item_only_through_linked_sandbox_verification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            queue_path, tasks_path, results_path = (
+                root / "TASK_QUEUE.json", root / "TASKS.json", root / "RESULTS.json"
+            )
+            update_queue_file(queue_path, [{"id": "QUEUE-ITEM", "type": "proposal"}])
+
+            def run_tasks(*tasks):
+                tasks_path.write_text(json.dumps({"tasks": list(tasks)}), encoding="utf-8")
+                code = run(tasks_path, results_path, queue_path)
+                return code, json.loads(results_path.read_text(encoding="utf-8"))
+
+            def status(target, task_id="set"):
+                return {"id": task_id, "type": "update_task_status", "task_id": "QUEUE-ITEM", "status": target}
+
+            code, results = run_tasks(status("SELECTED", "s"), status("IN_PROGRESS", "p"), status("DONE", "d"))
+            self.assertEqual(code, 1)
+            self.assertIn("no PASS verification", results["tasks"][2]["error"])
+
+            code, _ = run_tasks({
+                "id": "verify",
+                "type": "verify_test_patch_sandbox",
+                "source": "autopoesis/task_queue.py",
+                "queue_task_id": "QUEUE-ITEM",
+            }, status("DONE"))
+            self.assertEqual(code, 0)
+            queue = load_queue(queue_path)
+            self.assertEqual(queue["items"][0]["status"], "DONE")
+            self.assertEqual(queue["items"][0]["attempts"], 1)
+            evidence = [e for e in queue["history"] if e["event"] == "VERIFICATION_RECORDED"]
+            self.assertEqual([e["task_id"] for e in evidence], ["QUEUE-ITEM"])
+
+            code, results = run_tasks(status("OPEN"))
+            self.assertEqual(code, 1)
+            self.assertIn("Illegal transition", results["tasks"][0]["error"])
+            self.assertEqual(load_queue(queue_path)["items"][0]["status"], "DONE")
+
+
+if __name__ == "__main__":
+    unittest.main()

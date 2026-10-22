@@ -23,6 +23,16 @@ from .core import EvolutionError, canonical_json
 QUEUE_VERSION = 1
 QUEUE_STATUSES = {"OPEN", "SELECTED", "IN_PROGRESS", "DONE", "REJECTED"}
 QUEUE_HISTORY_EVENTS = {"CANDIDATE_ADDED", "STATUS_CHANGED", "VERIFICATION_RECORDED"}
+# Governed lifecycle. DONE and REJECTED are terminal. IN_PROGRESS -> OPEN is
+# the retry/interruption path; each entry into IN_PROGRESS counts an attempt.
+ALLOWED_TRANSITIONS = {
+    "OPEN": frozenset({"SELECTED", "REJECTED"}),
+    "SELECTED": frozenset({"IN_PROGRESS", "OPEN", "REJECTED"}),
+    "IN_PROGRESS": frozenset({"DONE", "OPEN", "REJECTED"}),
+    "DONE": frozenset(),
+    "REJECTED": frozenset(),
+}
+MAX_ATTEMPTS = 3
 
 
 def _write_queue_atomically(path: Path, queue: dict[str, Any]) -> None:
@@ -242,7 +252,7 @@ def merge_candidates(queue: dict[str, Any], candidates: list[dict[str, Any]]) ->
 
 
 def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str = "") -> dict[str, Any]:
-    """Record a bounded lifecycle transition without executing the task."""
+    """Record a status change without lifecycle policy; task data goes through advance_task."""
     if not isinstance(task_id, str) or not task_id.strip():
         raise EvolutionError("Task id must be a non-empty string")
     if not isinstance(status, str) or status not in QUEUE_STATUSES:
@@ -273,6 +283,39 @@ def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str =
         "at": timestamp,
     })
     return updated
+
+
+def _has_passing_verification(queue: dict[str, Any], task_id: str) -> bool:
+    """True when the latest verification since the last IN_PROGRESS entry is PASS."""
+    latest = None
+    for event in queue.get("history", []):
+        if event.get("task_id") != task_id:
+            continue
+        if event.get("event") == "STATUS_CHANGED" and event.get("to") == "IN_PROGRESS":
+            latest = None
+        elif event.get("event") == "VERIFICATION_RECORDED":
+            latest = event.get("verification_status")
+    return latest == "PASS"
+
+
+def advance_task(queue: dict[str, Any], task_id: str, status: str, note: str = "") -> dict[str, Any]:
+    """Apply one governed lifecycle transition; repeating the current status is a no-op."""
+    if not isinstance(status, str) or status not in QUEUE_STATUSES:
+        raise EvolutionError(f"Unsupported queue status: {status!r}")
+    matches = [item for item in queue.get("items", []) if item.get("id") == task_id]
+    if len(matches) != 1:
+        raise EvolutionError(f"Expected exactly one queued task with id {task_id!r}")
+    item = matches[0]
+    previous = item.get("status")
+    if previous == status:
+        return {"queue": json.loads(canonical_json(queue)), "changed": False}
+    if status not in ALLOWED_TRANSITIONS.get(previous, frozenset()):
+        raise EvolutionError(f"Illegal transition for task {task_id!r}: {previous!r} -> {status!r}")
+    if status == "IN_PROGRESS" and item.get("attempts", 0) >= MAX_ATTEMPTS:
+        raise EvolutionError(f"Task {task_id!r} reached the attempt limit of {MAX_ATTEMPTS}; reject it instead")
+    if status == "DONE" and not _has_passing_verification(queue, task_id):
+        raise EvolutionError(f"Task {task_id!r} has no PASS verification since its latest IN_PROGRESS")
+    return {"queue": record_outcome(queue, task_id, status, note), "changed": True}
 
 
 def record_verification_file(
@@ -328,3 +371,12 @@ def record_outcome_file(path: Path, task_id: str, status: str, note: str = "") -
         updated = record_outcome(queue, task_id, status, note)
         _write_queue_atomically(path, updated)
     return {"task_id": task_id, "status": status, "path": path.as_posix()}
+
+
+def advance_task_file(path: Path, task_id: str, status: str, note: str = "") -> dict[str, Any]:
+    """Persist a governed lifecycle transition; a no-op leaves the file untouched."""
+    with queue_write_lock(path):
+        result = advance_task(load_queue(path), task_id, status, note)
+        if result["changed"]:
+            _write_queue_atomically(path, result["queue"])
+    return {"task_id": task_id, "status": status, "changed": result["changed"], "path": path.as_posix()}
