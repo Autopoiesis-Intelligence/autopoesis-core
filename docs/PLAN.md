@@ -15,26 +15,26 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 
 | Blocker | Unblocks | Who |
 |---|---|---|
-| Codex verdict on #33 at `9c4f60f0d08f4aa279be2793e22d8c72a6ecde75` | merge of #33 | GPT/Codex, then owner |
-| Codex verdict on #34 at `79e469250036adf8125e7f6f6242ad7b940c2627` | merge of #34 | GPT/Codex, then owner |
+| Codex verdict on #33 at `8952df52600473ab7c27c363d73e2fdd05551a34` | merge of #33 | GPT/Codex, then owner |
+| Codex verdict on #34 at `480533b3eb376e3fcda5bfdce10a2bd7692c4eb3` | merge of #34 | GPT/Codex, then owner |
 | Unknown whether Codex automatic PR review is available for this repository | P2 | owner checks Codex settings |
 
 ## Tasks
 
 ### P0 — A3 closed task lifecycle — `IN_REVIEW` (PR #33)
 - **Goal:** only legal transitions; DONE only after a PASS for the item's own source since its latest IN_PROGRESS; no unchecked status writer.
-- **Evidence so far:** CI 39924317283; seed run 39924328639 and restore run 39924378188 at `9c4f60f`. Codex REQUEST_CHANGES on `0833384` is addressed in `74c3126`; the Codex P1 on `74c3126` (stale verifier, comment 6360484055) is addressed in `9c4f60f` by binding evidence to the attempt.
-- **Remaining:** Codex verdict on `9c4f60f`; owner merge; CI on the merge commit.
+- **Evidence so far:** at `8952df5`: PR CI 39931369279, seed 39931361330, restore 39931975513. Codex findings fixed since `74c3126`: stale verifier (attempt binding), PASS bound to the tested code revision, history edges replayed against the table on load, attempt counter checked against history, attempt type.
+- **Remaining:** a Codex verdict on `8952df5` (blocked by the Codex usage limit, see Blockers); owner merge; CI on the merge commit.
 
 ### P0 — A4 deterministic next-task selection — `IN_REVIEW` (PR #34)
 - **Depends on:** #33.
-- **Evidence so far:** CI 39924500783 at `79e4692` (contains #33 `9c4f60f`), including an 8-process concurrent-selection test.
+- **Evidence so far:** at `480533b` (contains #33 `8952df5`): PR CI 39932079992. Codex found no major issues on `79e4692`; its P2 on `88e6671` (malformed priority) is fixed in `d9151ef`.
 - **Remaining:** Codex verdict; after #33 merges, update the branch onto `main`, re-run CI, and get a verdict on the new head; owner merge.
 
 ### P1 — A9 task leases and recovery of stuck tasks — `IN_REVIEW` (PR #36, chained)
 - **Depends on:** #34 (and therefore #33). Built on the #34 branch; if #33/#34 change, A9 is rebuilt.
-- **Evidence so far:** at `08f1525` (contains #34 `79e4692`): PR CI 39924792696, seed 39924784538, restore 39924872876. Evidence binds source, attempt and lease token.
-- **Remaining:** Codex verdict on `08f1525`; owner confirmation of the ci.yml probe lines; merge after #34.
+- **Evidence so far:** at `4787a13` (contains #34 `480533b`): PR CI 39932167542, seed 39932159904, restore 39932194829. Codex P1s fixed: two live leases rejected on load; replayed PASS needs a revision and a lease token.
+- **Remaining:** a Codex verdict on `4787a13` (blocked by the usage limit); owner confirmation of the ci.yml probe lines; merge after #34.
 - **Design and test scenarios:** `/mnt/project-files/reviews/autonomous-stack/A9_LEASE_PLAN_2026-10-23.md`, summarized here.
 - **Acceptance:**
   1. The lease owner, token and expiry are persisted, validated by `load_queue`, and survive restore.
@@ -48,6 +48,7 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 
 ### P2 — Count automatic Codex reviews as verdicts — `BLOCKED` (owner checks Codex settings)
 - **Observed (2026-10-23):** PRs #20–#34 have no review from a Codex bot account. Every Codex post so far is an issue comment by the shared account with `performed_via_github_app = chatgpt-codex-connector`. Reviews are not read by `audit_verdict`.
+- **Observed (2026-10-23 08:35 UTC):** commenting `@codex review` triggers a Codex review by `chatgpt-codex-connector[bot]` on the exact head (summary comment with `codex-review-state`, inline findings, 👍 when clean). First seen on #33 comment 6360909547. At 09:30 UTC it stopped with "You have reached your Codex usage limits for code reviews".
 - **If automatic review is confirmed:** a separate PR extends `audit_verdict` to accept a review only from the Codex bot identity whose `commit_id` equals the head SHA and whose body carries the `Verdict:` block. Any other review stays ignored. This changes the review rules in `AGENTS.md`, so it needs the owner's approval before merge.
 
 ### P3 — Coordination protocol and claim checker — `IN_REVIEW` (PR #32)
