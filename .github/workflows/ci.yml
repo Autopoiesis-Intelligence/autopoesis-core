@@ -197,10 +197,11 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          import os
           from pathlib import Path
-          from autopoesis.queue_snapshot import validate_queue_snapshot
-          from autopoesis.task_queue import load_queue
+          from autopoesis.queue_snapshot import (
+              install_validated_queue_snapshot,
+              validate_queue_snapshot,
+          )
 
           snapshot = Path(".queue-restore/TASK_QUEUE.json")
           manifest_path = Path(".queue-restore/QUEUE_SNAPSHOT_MANIFEST.json")
@@ -213,23 +214,15 @@ jobs:
               source_head_sha=provenance.get("source_head_sha"),
               source_repository=provenance.get("source_repository"),
           )
-          restored = Path("TASK_QUEUE.json")
-          staged = Path("TASK_QUEUE.json.restore-tmp")
-          staged.write_bytes(snapshot.read_bytes())
-          try:
-              staged_queue = load_queue(staged)
-              if staged_queue != validation["queue"]:
-                  raise SystemExit("Staged queue does not match the validated source snapshot")
-              os.replace(staged, restored)
-          finally:
-              staged.unlink(missing_ok=True)
-          restored_queue = load_queue(restored)
-          if restored_queue != validation["queue"]:
-              raise SystemExit("Installed queue does not match the validated source snapshot")
+          installed = install_validated_queue_snapshot(
+              snapshot,
+              Path("TASK_QUEUE.json"),
+              expected_queue=validation["queue"],
+          )
           provenance["source_manifest_sha256"] = validation["source_manifest_sha256"]
           provenance["source_manifest_task_queue_sha256"] = validation["task_queue_sha256"]
           provenance["restored_queue_sha256"] = validation["task_queue_sha256"]
-          provenance["restored_queue_size_bytes"] = restored.stat().st_size
+          provenance["restored_queue_size_bytes"] = installed["size_bytes"]
           provenance_path.write_text(
               json.dumps(provenance, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
