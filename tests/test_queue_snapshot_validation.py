@@ -340,7 +340,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         cases = (
             ([], "exactly one"),
             ([{**artifact, "expired": True}], "exactly one"),
-            ([{**artifact, "id": 67891}], "exactly one"),
+            ([artifact, {**artifact, "id": 67891}], "exactly one"),
             ([{**artifact, "workflow_run": {"id": 999, "head_sha": "a" * 40}}], "not bound"),
             ([{**artifact, "workflow_run": {"id": 12345, "head_sha": "c" * 40}}], "head SHA"),
             ([{**artifact, "digest": "sha256:invalid"}], "valid SHA-256"),
