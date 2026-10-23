@@ -18,7 +18,12 @@ from autopoesis.task_queue import (
     select_next_task_file,
     update_queue_file,
 )
-from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, verify_test_patch_in_sandbox
+from autopoesis.executor import (
+    apply_patch_to_sandbox,
+    prepare_patch_artifact,
+    source_tree_digest,
+    verify_test_patch_in_sandbox,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -144,8 +149,16 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         note = task.get("note", "")
         if not isinstance(target_id, str) or not isinstance(status, str) or not isinstance(note, str):
             raise ValueError("update_task_status requires string task_id, status, and optional note")
+        # DONE is checked against the code as it is now, never a revision named by task data.
+        revision = source_tree_digest(ROOT / "autopoesis") if status == "DONE" else None
         result = advance_task_file(
-            queue_path, target_id, status, note, owner=task.get("owner", f"run_tasks:{task_id}"), token=task.get("lease_token")
+            queue_path,
+            target_id,
+            status,
+            note,
+            owner=task.get("owner", f"run_tasks:{task_id}"),
+            token=task.get("lease_token"),
+            revision=revision,
         )
     elif task_type == "select_next_task":
         owner = task.get("owner", f"run_tasks:{task_id}")
@@ -184,6 +197,7 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
             result.get("artifact_sha256"),
             task.get("source"),
             attempt,
+            result.get("source_tree_sha256"),
             task.get("lease_token"),
         )
 

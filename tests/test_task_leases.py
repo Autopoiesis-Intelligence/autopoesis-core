@@ -26,6 +26,7 @@ from autopoesis.task_queue import (
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "autopoesis/task_queue.py"
+REVISION = "a" * 64
 LATER = datetime.now(timezone.utc) + LEASE_TTL + timedelta(hours=1)
 
 CRASHING_EXECUTOR = textwrap.dedent("""
@@ -132,7 +133,7 @@ class TaskLeaseTests(unittest.TestCase):
             lambda: renew_lease_file(self.path, "TASK-1", old_token, now=LATER),
             lambda: record_verification_file(self.path, "TASK-1", "PASS", "unit", source=SOURCE,
                                              attempt=1, token=old_token, now=LATER),
-            lambda: advance_task_file(self.path, "TASK-1", "DONE", token=old_token, now=LATER),
+            lambda: advance_task_file(self.path, "TASK-1", "DONE", token=old_token, now=LATER, revision=REVISION),
             lambda: advance_task_file(self.path, "TASK-1", "IN_PROGRESS", token=old_token, now=LATER),
         ]
         for index, call in enumerate(attempts):
@@ -143,9 +144,10 @@ class TaskLeaseTests(unittest.TestCase):
 
         # T8: the current holder finishes only with its own PASS.
         with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
-            advance_task_file(self.path, "TASK-1", "DONE", token=new_token, now=LATER)
-        record_verification_file(self.path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=2, token=new_token, now=LATER)
-        advance_task_file(self.path, "TASK-1", "DONE", token=new_token, now=LATER)
+            advance_task_file(self.path, "TASK-1", "DONE", token=new_token, now=LATER, revision=REVISION)
+        record_verification_file(self.path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=2, revision=REVISION,
+                                 token=new_token, now=LATER)
+        advance_task_file(self.path, "TASK-1", "DONE", token=new_token, now=LATER, revision=REVISION)
         done = item(self.path)
         self.assertEqual(done["status"], "DONE")
         self.assertNotIn("lease", done)
@@ -203,6 +205,19 @@ class TaskLeaseTests(unittest.TestCase):
                 self.path.write_text(json.dumps(payload), encoding="utf-8")
                 with self.assertRaises(EvolutionError):
                     load_queue(self.path)
+
+    def test_snapshot_with_two_live_leases_is_rejected_on_load(self):
+        self.acquire("executor-A")
+        payload = json.loads(self.path.read_text(encoding="utf-8"))
+        second = payload["items"][1]
+        second["status"] = "SELECTED"
+        second["lease"] = {**payload["items"][0]["lease"], "owner": "executor-B", "token": "b" * 32}
+        payload["history"] = [e for e in payload["history"] if e.get("task_id") != second["id"]]
+        self.path.write_text(json.dumps(payload), encoding="utf-8")
+        with self.assertRaisesRegex(EvolutionError, "more than one active task"):
+            load_queue(self.path)
+        with self.assertRaisesRegex(EvolutionError, "more than one active task"):
+            advance_task_file(self.path, second["id"], "IN_PROGRESS", token="b" * 32)
 
 
     def test_runner_hands_out_the_lease_and_recovers_nothing_while_it_is_live(self):
