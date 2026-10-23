@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from autopoesis.task_queue import advance_task_file, record_verification_file, update_queue_file
+from autopoesis.task_queue import advance_task_file, current_attempt, record_verification_file, update_queue_file
 from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, verify_test_patch_in_sandbox
 
 
@@ -141,6 +141,11 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
     elif task_type == "prepare_test_patch":
         result = prepare_patch_artifact(task, ROOT)
     elif task_type == "verify_test_patch_sandbox":
+        evidence_id = task.get("queue_task_id", task_id)
+        if not isinstance(evidence_id, str) or not evidence_id.strip():
+            raise ValueError("queue_task_id must be a non-empty string")
+        # Capture the attempt before running, so a result that returns after a retry is refused.
+        attempt = current_attempt(queue_path, evidence_id)
         result = verify_test_patch_in_sandbox(task, ROOT)
     elif task_type == "apply_test_patch_sandbox":
         artifact = prepare_patch_artifact(task, ROOT)
@@ -155,9 +160,6 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         raise ValueError(f"Unsupported task type: {task_type!r}")
 
     if task_type == "verify_test_patch_sandbox" and result.get("verification_status") in {"PASS", "FAIL"}:
-        evidence_id = task.get("queue_task_id", task_id)
-        if not isinstance(evidence_id, str) or not evidence_id.strip():
-            raise ValueError("queue_task_id must be a non-empty string")
         record_verification_file(
             queue_path,
             evidence_id,
@@ -165,6 +167,7 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
             "GENERATED_TEST_EXECUTION",
             result.get("artifact_sha256"),
             task.get("source"),
+            attempt,
         )
 
     task_status = "FAIL" if result.get("verification_status") == "FAIL" else "PASS"

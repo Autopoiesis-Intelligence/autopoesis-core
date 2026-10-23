@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from autopoesis.core import EvolutionError
@@ -13,6 +14,7 @@ from autopoesis.task_queue import (
     QUEUE_STATUSES,
     advance_task,
     advance_task_file,
+    current_attempt,
     load_queue,
     merge_candidates,
     empty_queue,
@@ -44,6 +46,7 @@ def with_verification(queue, status, source=SOURCE):
         "verification_level": "UNIT_TEST_FIXTURE",
         "artifact_sha256": None,
         "source": source,
+        "attempt": next(i for i in queue["items"] if i["id"] == "TASK-1")["attempts"],
         "at": "2999-01-01T00:00:00+00:00",
     })
     return queue
@@ -117,6 +120,8 @@ class TaskLifecycleTests(unittest.TestCase):
                 {"id": "TASK-1", "type": "proposal", "source": SOURCE},
                 {"id": "NO-SOURCE", "type": "proposal"},
             ])
+            advance_task_file(path, "TASK-1", "SELECTED")
+            advance_task_file(path, "TASK-1", "IN_PROGRESS")
             before = path.read_bytes()
             for task_id, source, message in (
                 ("TASK-1", "autopoesis/core.py", "does not match"),
@@ -125,9 +130,9 @@ class TaskLifecycleTests(unittest.TestCase):
             ):
                 with self.subTest(task_id=task_id, source=source):
                     with self.assertRaisesRegex(EvolutionError, message):
-                        record_verification_file(path, task_id, "PASS", "unit", source=source)
+                        record_verification_file(path, task_id, "PASS", "unit", source=source, attempt=1)
             self.assertEqual(path.read_bytes(), before)
-            record_verification_file(path, "TASK-1", "PASS", "unit", source=SOURCE)
+            record_verification_file(path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=1)
             self.assertEqual(load_queue(path)["history"][-1]["source"], SOURCE)
 
     def test_queue_module_exposes_no_unchecked_status_writer(self):
@@ -140,6 +145,51 @@ class TaskLifecycleTests(unittest.TestCase):
         queue = advance(queue, "OPEN", "SELECTED", "IN_PROGRESS")
         with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
             advance_task(queue, "TASK-1", "DONE")
+
+    def test_delayed_verifier_cannot_record_into_a_later_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{"id": "TASK-1", "type": "proposal", "source": SOURCE}])
+            advance_task_file(path, "TASK-1", "SELECTED")
+            advance_task_file(path, "TASK-1", "IN_PROGRESS")
+            captured = current_attempt(path, "TASK-1")
+            for status in ("OPEN", "SELECTED", "IN_PROGRESS"):
+                advance_task_file(path, "TASK-1", status)
+            before = path.read_bytes()
+            with self.assertRaisesRegex(EvolutionError, "stale"):
+                record_verification_file(path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=captured)
+            self.assertEqual(path.read_bytes(), before)
+            with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
+                advance_task_file(path, "TASK-1", "DONE")
+
+    def test_runner_refuses_a_pass_that_returns_after_a_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            queue_path, tasks_path, results_path = (
+                root / "TASK_QUEUE.json", root / "TASKS.json", root / "RESULTS.json"
+            )
+            update_queue_file(queue_path, [{"id": "TASK-1", "type": "proposal", "source": SOURCE}])
+            advance_task_file(queue_path, "TASK-1", "SELECTED")
+            advance_task_file(queue_path, "TASK-1", "IN_PROGRESS")
+
+            def slow_verifier(task, root):
+                # Another executor retries the item while this verification is still running.
+                for status in ("OPEN", "SELECTED", "IN_PROGRESS"):
+                    advance_task_file(queue_path, "TASK-1", status)
+                return {"verification_status": "PASS", "artifact_sha256": None}
+
+            tasks_path.write_text(json.dumps({"tasks": [{
+                "id": "verify", "type": "verify_test_patch_sandbox", "source": SOURCE, "queue_task_id": "TASK-1",
+            }]}), encoding="utf-8")
+            with mock.patch("run_tasks.verify_test_patch_in_sandbox", side_effect=slow_verifier):
+                code = run(tasks_path, results_path, queue_path)
+            self.assertEqual(code, 1)
+            self.assertIn("stale", json.loads(results_path.read_text(encoding="utf-8"))["tasks"][0]["error"])
+            queue = load_queue(queue_path)
+            self.assertEqual(queue["items"][0]["attempts"], 2)
+            self.assertFalse([e for e in queue["history"] if e["event"] == "VERIFICATION_RECORDED"])
+            with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
+                advance_task_file(queue_path, "TASK-1", "DONE")
 
     def test_attempt_limit_stops_retries_but_allows_rejection(self):
         queue = fresh_queue()
