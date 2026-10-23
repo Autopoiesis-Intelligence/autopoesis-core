@@ -201,7 +201,7 @@ jobs:
             QUEUE_SNAPSHOT_MANIFEST.json
             CYCLE_RESULT.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
       - name: Propagate cycle refusal
         if: ${{ steps.cycle.outcome == 'failure' }}
