@@ -28,6 +28,28 @@ class ScheduledStateSelectionTests(unittest.TestCase):
         )
         self.assertEqual(selected["id"], 101)
 
+    def test_rerun_attempt_is_never_selected_as_persisted_state(self):
+        pages = [{
+            "workflow_runs": [
+                run(10, 10, conclusion="success"),
+                {**run(11, 11, conclusion="success"), "run_attempt": 2},
+            ]
+        }]
+        selected = select_prior_successful_run(
+            pages, current_run_id=12, bootstrap=False
+        )
+        self.assertEqual(selected["id"], 10)
+
+    def test_bootstrap_does_not_treat_rerun_as_successful_history(self):
+        pages = [{
+            "workflow_runs": [
+                {**run(11, 11, conclusion="success"), "run_attempt": 2},
+            ]
+        }]
+        self.assertIsNone(
+            select_prior_successful_run(pages, current_run_id=12, bootstrap=True)
+        )
+
     def test_bootstrap_refused_when_success_is_only_on_later_page(self):
         pages = [
             {"workflow_runs": [run(i, i, conclusion="failure") for i in range(1, 101)]},
