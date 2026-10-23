@@ -37,7 +37,7 @@ jobs:
           BOOTSTRAP: ${{ inputs.bootstrap || false }}
         run: |
           set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/autopoiesis-cycle.yml/runs?branch=main&status=success&per_page=100" > .cycle-runs.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/autopoiesis-cycle.yml/runs?branch=main&status=completed&per_page=100" > .cycle-runs.json
           python - <<'PY'
           import json, os
           from pathlib import Path
@@ -182,7 +182,7 @@ jobs:
               source_head_sha=os.environ["SOURCE_HEAD_SHA"],
               source_repository=os.environ["SOURCE_REPOSITORY"],
           )
-          Path("QUEUE_SNAPSHOT_MANIFEST.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\\n")
+          Path("QUEUE_SNAPSHOT_MANIFEST.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
           PY
 
       - name: Persist next queue state
