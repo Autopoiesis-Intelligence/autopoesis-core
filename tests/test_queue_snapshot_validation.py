@@ -368,10 +368,30 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         }
         return {**run, **overrides}
 
+    def _history_payload(self, runs):
+        page = {
+            "page": 1,
+            "per_page": 100,
+            "total_count": len(runs),
+            "next_page": None,
+            "request_url": "https://api.github.com/repos/example/repo/actions/workflows/ci.yml/runs?per_page=100&page=1",
+            "link_header": None,
+            "workflow_runs": runs,
+        }
+        return {
+            "workflow_runs": runs,
+            "total_count": len(runs),
+            "pagination_evidence": {
+                "complete": True,
+                "page_count": 1,
+                "pages": [page],
+            },
+        }
+
     def _latest_check(self, source_run_id, runs, current_run_id=500):
         return require_latest_source_run(
             {"source_run_id": source_run_id},
-            {"workflow_runs": runs},
+            self._history_payload(runs),
             current_run_id=current_run_id,
             current_branch="main",
         )
@@ -419,7 +439,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         ]
 
         self.assertEqual(
-            latest_source_run_id({"workflow_runs": runs}, current_run_id=500, current_branch="main"),
+            latest_source_run_id(self._history_payload(runs), current_run_id=500, current_branch="main"),
             300,
         )
 
@@ -427,11 +447,11 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         runs = [self._dispatch_run(500), self._dispatch_run(300, head_branch="other")]
 
         with self.assertRaisesRegex(ValueError, "No successful workflow_dispatch"):
-            latest_source_run_id({"workflow_runs": runs}, current_run_id=500, current_branch="main")
+            latest_source_run_id(self._history_payload(runs), current_run_id=500, current_branch="main")
 
     def test_latest_check_fails_closed_on_missing_or_malformed_run_list(self):
         cases = (
-            ("no candidate runs", {"workflow_runs": []}, "No successful workflow_dispatch"),
+            ("no candidate runs", self._history_payload([]), "No successful workflow_dispatch"),
             ("missing array", {}, "workflow_runs array"),
             ("not an object", [], "JSON object"),
         )
