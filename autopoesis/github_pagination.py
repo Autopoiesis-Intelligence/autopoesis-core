@@ -82,6 +82,14 @@ def collect_paginated_collection(
             target = urlparse(next_url)
             if (target.scheme, target.netloc, target.path) != (current.scheme, current.netloc, current.path):
                 raise ValueError("Next-page URL changes API origin or endpoint")
+            current_query = parse_qs(current.query, keep_blank_values=True)
+            target_query = parse_qs(target.query, keep_blank_values=True)
+            current_filters = {key: values for key, values in current_query.items()
+                               if key not in {"page", "per_page"}}
+            target_filters = {key: values for key, values in target_query.items()
+                              if key not in {"page", "per_page"}}
+            if target_filters != current_filters:
+                raise ValueError("Next-page URL changes fixed query filters")
         if next_page is not None and next_page != page_number + 1:
             raise ValueError(f"Page {page_number} Link header skips or repeats a page")
         if "last" in links and next_page is None and _page_from_url(links["last"], expected_page_size=expected_page_size) != page_number:
