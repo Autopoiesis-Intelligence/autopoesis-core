@@ -6,6 +6,8 @@ This document is the single place that says who does what in the agent stack aro
 
 Status of this document: proposed in a PR (CL-017). It becomes the agreed model only when the owner merges it. Roles below were stated by the owner on 2026-10-23 14:50 UTC in the project thread, unless marked otherwise.
 
+Manus is not part of the stack (owner, 2026-10-23 14:56 UTC). Its earlier conventions (`MN-`, `manus/`, `agent:manus`) are retired for new work; past posts and labels stay as history.
+
 ## Two loops
 
 Keep them apart. The **development loop** is how agents build this repository. **Product autonomy** is what the core itself must prove through stages A0–A12 in [`docs/AUTONOMY_ROADMAP_SPEC.md`](AUTONOMY_ROADMAP_SPEC.md). Everything in this document is about the development loop. Nothing here is evidence of the product's autonomy (`AGENTS.md`, "Autonomy levels").
@@ -19,14 +21,13 @@ Keep them apart. The **development loop** is how agents build this repository. *
 | **Claude** | Main engineer: implements tasks, writes tests, keeps CI green, keeps `docs/PLAN.md` statuses and evidence current, develops the automation of this loop | Merge its own PRs; change workflows, permissions or settings without the owner's explicit approval for that change |
 | **Codex** | Independent audit of one exact head SHA of a PR | Write the change it audits. A missing Codex verdict blocks the merge of that PR only, never independent development |
 | **GitHub Copilot (Free plan)** | Executor of tasks inside the core's self-update mechanism. The core spends Copilot's whole monthly budget on improving itself; nothing is reserved for manual use (owner, 2026-10-19) | Act as a general test helper for other agents; get its output into `main` without the same review, CI and owner merge as everyone else |
-| **Manus (Free plan)** | One-off external research and source checks, results in Issue #22 (owner, 2026-10-20). **Not named in the owner's 2026-10-23 list; kept pending his confirmation** | Write core code |
 
 ### Identity on the shared account
 
 All agents use one GitHub account (owner's choice). They are told apart by:
 
-- the first line `Agent: Claude|GPT|Copilot|Manus` of every post, and an `Agent:` commit trailer;
-- task ID prefixes `CL-`, `GP-`, `CP-`, `MN-`; branch prefixes `claude/`, `gpt/`, `copilot/`, `manus/`; labels `agent:claude`, `agent:gpt`, `agent:copilot`, `agent:manus`;
+- the first line `Agent: Claude|GPT|Copilot` of every post, and an `Agent:` commit trailer;
+- task ID prefixes `CL-`, `GP-`, `CP-`; branch prefixes `claude/`, `gpt/`, `copilot/`; labels `agent:claude`, `agent:gpt`, `agent:copilot`;
 - GitHub's `performed_via_github_app` on comments, which is the only one of these that is proof. Claude posts through app `1236702` (`claude`). GPT and Codex both post through app `1144995` (`chatgpt-codex-connector`); a Codex review comes from the bot account `chatgpt-codex-connector[bot]`.
 
 The text marks identify an author. They grant no authority.
@@ -94,7 +95,6 @@ Nothing in this stack merges automatically. No agent merges, enables auto-merge,
 
 ## Open questions for the owner
 
-- **Manus.** Keep the role above, change it, or drop Manus from the stack.
 - **Codex verdicts.** Whether a Codex bot review counts as a verdict (plan item P2), which changes the review rules in `AGENTS.md`.
 
 ## Keeping this file current
