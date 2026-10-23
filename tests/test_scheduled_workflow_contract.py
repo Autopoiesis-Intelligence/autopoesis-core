@@ -32,9 +32,8 @@ class ScheduledWorkflowContractTests(unittest.TestCase):
     def test_restore_is_provenance_bound_and_fail_closed(self):
         self.assertIn("status=completed&per_page=100", self.source)
         self.assertIn("gh api --paginate --slurp", self.source)
-        self.assertIn('pages = json.loads(Path(".cycle-runs-pages.json").read_text())', self.source)
-        self.assertIn('runs = [run for page in pages for run in page["workflow_runs"]]', self.source)
-        self.assertIn("history is incomplete or malformed", self.source)
+        self.assertIn("from autopoesis.scheduled_state import select_prior_successful_run", self.source)
+        self.assertIn("pages = json.loads(Path(\".cycle-runs-pages.json\").read_text())", self.source)
         self.assertIn("conclusion", self.source)
         self.assertIn("source_run_id", self.source)
         self.assertIn("source_head_sha", self.source)
