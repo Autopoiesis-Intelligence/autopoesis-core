@@ -133,7 +133,7 @@ jobs:
           )
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
               output.write(f"artifact_id={provenance['source_artifact_id']}\n")
-            output.write(f"artifact_digest={provenance['source_artifact_digest']}\n")
+              output.write(f"artifact_digest={provenance['source_artifact_digest']}\n")
           print(
               f"Verified source run {provenance['source_run_id']} "
               f"at SHA {provenance['source_head_sha']}; "
