@@ -75,8 +75,8 @@ def build_recovery_proposal(evidence: Any) -> dict[str, Any]:
             "Newest relevant cycle is not successful; refusing rollback or bootstrap",
             latest_run_id=run_id,
         )
-    if latest.get("run_attempt", 1) != 1:
-        return _blocked("Newest relevant cycle was rerun; refusing ambiguous state", latest_run_id=run_id)
+    if type(latest.get("run_attempt")) is not int or latest["run_attempt"] != 1:
+        return _blocked("Newest run attempt is missing, invalid, or rerun; refusing ambiguous state", latest_run_id=run_id)
     head_sha = latest.get("head_sha")
     if not isinstance(head_sha, str) or not _SHA1.fullmatch(head_sha):
         return _blocked("Newest run has no valid lowercase head SHA", latest_run_id=run_id)
