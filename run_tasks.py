@@ -15,6 +15,7 @@ from autopoesis.task_queue import (
     current_attempt,
     record_verification_file,
     recover_expired_leases_file,
+    renew_lease_file,
     select_next_task_file,
     update_queue_file,
 )
@@ -165,6 +166,14 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         if not isinstance(owner, str) or not owner.strip():
             raise ValueError("select_next_task owner must be a non-empty string")
         result = select_next_task_file(queue_path, owner)
+    elif task_type == "renew_lease":
+        target_id = task.get("queue_task_id", task_id)
+        token = task.get("lease_token")
+        if not isinstance(target_id, str) or not target_id.strip():
+            raise ValueError("renew_lease queue_task_id must be a non-empty string")
+        if not isinstance(token, str) or not token.strip():
+            raise ValueError("renew_lease requires lease_token")
+        result = renew_lease_file(queue_path, target_id, token)
     elif task_type == "recover_expired_leases":
         result = recover_expired_leases_file(queue_path)
     elif task_type == "prepare_test_patch":
