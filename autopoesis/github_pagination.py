@@ -166,6 +166,42 @@ def validate_paginated_collection(
             raise ValueError(f"Page {index} has no captured request URL")
         if "link_header" not in page_data:
             raise ValueError(f"Page {index} has no captured Link header evidence")
+        request_url = page_data["request_url"]
+        parsed_request = urlparse(request_url)
+        request_query = parse_qs(parsed_request.query, keep_blank_values=True)
+        request_pages = request_query.get("page", [])
+        request_sizes = request_query.get("per_page", [])
+        if len(request_pages) != 1 or not request_pages[0].isdigit() or int(request_pages[0]) != index:
+            raise ValueError(f"Page {index} request URL page disagrees with normalized evidence")
+        if len(request_sizes) != 1 or not request_sizes[0].isdigit() or int(request_sizes[0]) != expected_page_size:
+            raise ValueError(f"Page {index} request URL per_page disagrees with normalized evidence")
+        request_filters = {key: values for key, values in request_query.items()
+                           if key not in {"page", "per_page"}}
+        if index == 1:
+            first_endpoint = (parsed_request.scheme, parsed_request.netloc, parsed_request.path)
+            first_filters = request_filters
+        elif ((parsed_request.scheme, parsed_request.netloc, parsed_request.path) != first_endpoint
+              or request_filters != first_filters):
+            raise ValueError(f"Page {index} request URL changes endpoint or fixed query filters")
+        links = _links(page_data["link_header"])
+        raw_next = links.get("next")
+        if expected_next is None:
+            if raw_next is not None:
+                raise ValueError(f"Terminal page {index} raw Link header still advertises next")
+        else:
+            if raw_next is None:
+                raise ValueError(f"Page {index} raw Link header is missing next relation")
+            raw_next_page = _page_from_url(raw_next, expected_page_size=expected_page_size)
+            if raw_next_page != expected_next:
+                raise ValueError(f"Page {index} raw next URL disagrees with normalized next_page")
+            parsed_next = urlparse(raw_next)
+            next_query = parse_qs(parsed_next.query, keep_blank_values=True)
+            next_filters = {key: values for key, values in next_query.items()
+                            if key not in {"page", "per_page"}}
+            if ((parsed_next.scheme, parsed_next.netloc, parsed_next.path)
+                != (parsed_request.scheme, parsed_request.netloc, parsed_request.path)
+                or next_filters != request_filters):
+                raise ValueError(f"Page {index} raw next URL changes endpoint or fixed query filters")
 
         page_records = page_data.get(collection_key)
         if not isinstance(page_records, list):
