@@ -64,7 +64,7 @@ class ScheduledWorkflowContractTests(unittest.TestCase):
         self.assertIn("workflow_run", self.source)
         self.assertIn("sha256:[0-9a-f]{64}", self.source)
         self.assertIn("validate_queue_snapshot", self.source)
-        self.assertIn("Installed queue differs from validated snapshot", self.source)
+        self.assertIn("install_validated_queue_snapshot", self.source)
 
     def test_cycle_is_bounded_and_failure_is_not_hidden(self):
         self.assertIn("--budget-seconds 600", self.source)
