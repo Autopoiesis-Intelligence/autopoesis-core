@@ -15,24 +15,26 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 
 | Blocker | Unblocks | Who |
 |---|---|---|
-| Codex verdict on #33 at `74c3126a6672ee9468b10bab4cb1425ceb203706` | merge of #33 | GPT/Codex, then owner |
-| Codex verdict on #34 at `e27d6c0820d307b5b2dbdb7e21dff73f6dfbd25b` | merge of #34 | GPT/Codex, then owner |
+| Codex verdict on #33 at `9c4f60f0d08f4aa279be2793e22d8c72a6ecde75` | merge of #33 | GPT/Codex, then owner |
+| Codex verdict on #34 at `79e469250036adf8125e7f6f6242ad7b940c2627` | merge of #34 | GPT/Codex, then owner |
 | Unknown whether Codex automatic PR review is available for this repository | P2 | owner checks Codex settings |
 
 ## Tasks
 
 ### P0 — A3 closed task lifecycle — `IN_REVIEW` (PR #33)
 - **Goal:** only legal transitions; DONE only after a PASS for the item's own source since its latest IN_PROGRESS; no unchecked status writer.
-- **Evidence so far:** CI 39918102491; seed run 39918114086 and restore run 39918147389 at `74c3126`. Codex REQUEST_CHANGES on `0833384` (reported in chat, not in GitHub) is addressed in `74c3126`.
-- **Remaining:** Codex verdict on `74c3126`; owner merge; CI on the merge commit.
+- **Evidence so far:** CI 39924317283; seed run 39924328639 and restore run 39924378188 at `9c4f60f`. Codex REQUEST_CHANGES on `0833384` is addressed in `74c3126`; the Codex P1 on `74c3126` (stale verifier, comment 6360484055) is addressed in `9c4f60f` by binding evidence to the attempt.
+- **Remaining:** Codex verdict on `9c4f60f`; owner merge; CI on the merge commit.
 
 ### P0 — A4 deterministic next-task selection — `IN_REVIEW` (PR #34)
 - **Depends on:** #33.
-- **Evidence so far:** CI 39918419220 at `e27d6c0`, including an 8-process concurrent-selection test.
+- **Evidence so far:** CI 39924500783 at `79e4692` (contains #33 `9c4f60f`), including an 8-process concurrent-selection test.
 - **Remaining:** Codex verdict; after #33 merges, update the branch onto `main`, re-run CI, and get a verdict on the new head; owner merge.
 
-### P1 — A9 task leases and recovery of stuck tasks — `READY` (chained)
+### P1 — A9 task leases and recovery of stuck tasks — `IN_REVIEW` (PR #36, chained)
 - **Depends on:** #34 (and therefore #33). Built on the #34 branch; if #33/#34 change, A9 is rebuilt.
+- **Evidence so far:** at `08f1525` (contains #34 `79e4692`): PR CI 39924792696, seed 39924784538, restore 39924872876. Evidence binds source, attempt and lease token.
+- **Remaining:** Codex verdict on `08f1525`; owner confirmation of the ci.yml probe lines; merge after #34.
 - **Design and test scenarios:** `/mnt/project-files/reviews/autonomous-stack/A9_LEASE_PLAN_2026-10-23.md`, summarized here.
 - **Acceptance:**
   1. The lease owner, token and expiry are persisted, validated by `load_queue`, and survive restore.
