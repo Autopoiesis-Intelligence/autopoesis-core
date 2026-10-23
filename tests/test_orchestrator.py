@@ -1,6 +1,7 @@
 """A10: the bounded unattended cycle, through the real queue file and runner entry point."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -137,6 +138,23 @@ class OrchestratorTests(unittest.TestCase):
         self.assertFalse(self.events("VERIFICATION_RECORDED"))
         self.assertEqual(run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing})["final"],
                          "DONE")
+
+    def test_large_result_and_silent_exit_are_classified_correctly(self):
+        update_queue_file(self.path, [task("A-LARGE"), task("B-SILENT")])
+
+        def large(item, root):
+            # Bigger than a pipe buffer: the parent must read it before waiting for the child.
+            return {**passing(item, root), "detail": "x" * 1_000_000}
+
+        def silent(item, root):
+            os._exit(3)
+
+        handlers = {"verify_test_scaffold": lambda item, root: (large if item["id"] == "A-LARGE" else silent)(item, root)}
+        first = run_cycle(self.path, "runner", ROOT, handlers=handlers, budget_seconds=30)
+        self.assertEqual((first["task_id"], first["final"]), ("A-LARGE", "DONE"))
+        second = run_cycle(self.path, "runner", ROOT, handlers=handlers, budget_seconds=30)
+        self.assertEqual((second["task_id"], second["final"], second["verification"]), ("B-SILENT", "OPEN", "FAIL"))
+        self.assertIn("code 3", second["detail"])
 
     def test_expired_lease_is_recovered_before_selection(self):
         update_queue_file(self.path, [task()])

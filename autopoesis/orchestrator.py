@@ -60,29 +60,38 @@ def _when_unlocked(call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     raise AssertionError("unreachable")
 
 
-def _run_handler(handler: Handler, item: dict[str, Any], root: Path, results: Any) -> None:
+def _run_handler(handler: Handler, item: dict[str, Any], root: Path, sender: Any) -> None:
     try:
-        results.put(handler(item, root))
+        result = handler(item, root)
     except Exception as exc:  # A handler failure is the task's outcome, not the runner's crash.
-        results.put({"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
-                     "detail": f"{type(exc).__name__}: {exc}"})
+        result = {"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
+                  "detail": f"{type(exc).__name__}: {exc}"}
+    sender.send(result)
+    sender.close()
 
 
 def _bounded(handler: Handler, item: dict[str, Any], root: Path, seconds: float) -> dict[str, Any] | None:
     """Run the handler in a child process and kill it at the deadline; None means it ran out of time."""
     context = multiprocessing.get_context("fork")
-    results = context.Queue()
-    child = context.Process(target=_run_handler, args=(handler, item, root, results), daemon=True)
+    receiver, sender = context.Pipe(duplex=False)
+    child = context.Process(target=_run_handler, args=(handler, item, root, sender), daemon=True)
     child.start()
-    child.join(max(seconds, 0))
-    if child.is_alive():
-        child.kill()
+    sender.close()  # The parent keeps only the read end, so a dead child shows up as EOF.
+    try:
+        # Read before joining: a child blocked on a full pipe would otherwise never exit.
+        if not receiver.poll(max(seconds, 0)):
+            return None
+        try:
+            return receiver.recv()
+        except EOFError:
+            child.join()
+            return {"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
+                    "detail": f"handler exited with code {child.exitcode} and no result"}
+    finally:
+        receiver.close()
+        if child.is_alive():
+            child.kill()
         child.join()
-        return None
-    if results.empty():
-        return {"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
-                "detail": f"handler exited with code {child.exitcode} and no result"}
-    return results.get()
 
 
 def run_cycle(
