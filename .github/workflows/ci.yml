@@ -133,6 +133,7 @@ jobs:
           )
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
               output.write(f"artifact_id={provenance['source_artifact_id']}\n")
+            output.write(f"artifact_digest={provenance['source_artifact_digest']}\n")
           print(
               f"Verified source run {provenance['source_run_id']} "
               f"at SHA {provenance['source_head_sha']}; "
@@ -140,15 +141,21 @@ jobs:
               f"with archive digest {provenance['source_artifact_digest']}."
           )
           PY
-      - name: Download prior queue snapshot
+      - name: Download and verify prior queue snapshot archive
         if: ${{ inputs.restore_run_id != '' }}
-        uses: actions/download-artifact@v4
-        with:
-          artifact-ids: ${{ steps.source.outputs.artifact_id }}
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ steps.source.outputs.run_id }}
-          path: .queue-restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.source.outputs.artifact_id }}
+          EXPECTED_DIGEST: ${{ steps.source.outputs.artifact_digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p .queue-restore
+          curl --fail --silent --show-error --location \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            --output .queue-restore-artifact.zip
+          python -m autopoesis.artifact_archive .queue-restore-artifact.zip .queue-restore "${EXPECTED_DIGEST}"
       - name: Inject restore fault for negative verification
         if: ${{ inputs.restore_run_id != '' && inputs.restore_fault != '' && inputs.restore_fault != 'none' }}
         env:
