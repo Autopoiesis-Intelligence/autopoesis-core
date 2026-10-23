@@ -37,15 +37,18 @@ jobs:
           BOOTSTRAP: ${{ inputs.bootstrap || false }}
         run: |
           set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/autopoiesis-cycle.yml/runs?branch=main&status=completed&per_page=100" > .cycle-runs.json
+          # Read every API page: bootstrap is allowed only when history is complete.
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/workflows/autopoiesis-cycle.yml/runs?branch=main&status=completed&per_page=100" > .cycle-runs-pages.json
           python - <<'PY'
           import json, os, re
           from pathlib import Path
-          payload = json.loads(Path(".cycle-runs.json").read_text())
+          pages = json.loads(Path(".cycle-runs-pages.json").read_text())
+          if not isinstance(pages, list) or not pages:
+              raise SystemExit("Refusing: workflow runs history is incomplete or malformed")
+          if any(not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list) for page in pages):
+              raise SystemExit("Refusing: workflow runs page is malformed")
+          runs = [run for page in pages for run in page["workflow_runs"]]
           current = int(os.environ["GITHUB_RUN_ID"])
-          runs = payload.get("workflow_runs")
-          if not isinstance(runs, list):
-              raise SystemExit("Refusing: workflow runs response has no workflow_runs list")
           prior = [r for r in runs if isinstance(r, dict) and r.get("id") != current
                    and r.get("head_branch") == "main" and r.get("conclusion") == "success"
                    and r.get("path", "").split("@", 1)[0] == ".github/workflows/autopoiesis-cycle.yml"]
