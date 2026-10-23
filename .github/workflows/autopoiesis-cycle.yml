@@ -42,22 +42,15 @@ jobs:
           python - <<'PY'
           import json, os, re
           from pathlib import Path
+          from autopoesis.scheduled_state import select_prior_successful_run
           pages = json.loads(Path(".cycle-runs-pages.json").read_text())
-          if not isinstance(pages, list) or not pages:
-              raise SystemExit("Refusing: workflow runs history is incomplete or malformed")
-          if any(not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list) for page in pages):
-              raise SystemExit("Refusing: workflow runs page is malformed")
-          runs = [run for page in pages for run in page["workflow_runs"]]
-          current = int(os.environ["GITHUB_RUN_ID"])
-          prior = [r for r in runs if isinstance(r, dict) and r.get("id") != current
-                   and r.get("head_branch") == "main" and r.get("conclusion") == "success"
-                   and r.get("path", "").split("@", 1)[0] == ".github/workflows/autopoiesis-cycle.yml"]
-          prior.sort(key=lambda r: (r.get("run_number", 0), r.get("id", 0)), reverse=True)
           bootstrap = os.environ.get("BOOTSTRAP", "false").lower() == "true"
-          if prior and bootstrap:
-              raise SystemExit("Refusing bootstrap: a prior successful cycle already exists")
-          if not prior and not bootstrap:
-              raise SystemExit("No successful prior snapshot; dispatch once with bootstrap=true")
+          try:
+              prior = select_prior_successful_run(
+                  pages, current_run_id=int(os.environ["GITHUB_RUN_ID"]), bootstrap=bootstrap
+              )
+          except ValueError as exc:
+              raise SystemExit(str(exc)) from exc
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               if prior:
                   run = prior[0]
