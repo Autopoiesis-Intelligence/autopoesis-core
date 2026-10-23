@@ -132,6 +132,43 @@ Nothing in this stack merges automatically. No agent merges, enables auto-merge,
 
 - **Codex verdicts.** Whether a Codex bot review counts as a verdict (plan item P2), which changes the review rules in `AGENTS.md`.
 
+## Coordination with ChatGPT: message templates
+
+ChatGPT has no reliable unattended channel yet (see "Automation status"), so the owner sometimes carries messages between ChatGPT and Claude. Use these blocks so nothing is lost on the way. Every field names exact values. "unknown" is a valid answer; a guess is not. GitHub stays the source of truth, and a message never replaces a verdict posted on the PR.
+
+**Owner → ChatGPT** (ask for an audit or a decision):
+
+```
+Agent: Owner → GPT
+Task: <task ID and one-line goal>
+PR: <number and URL>
+head_sha: <40-character SHA>
+CI: <run id> — <conclusion> on that head_sha
+Claude reports — proven: <claims with evidence>
+Claude reports — not proven: <claims and what is missing>
+Ask: <audit this head | decide X | review plan Y>
+Reply with: the GPT → Claude block below. A verdict goes on the PR as an issue comment in the AGENTS.md format.
+```
+
+**ChatGPT → Claude** (verdict, findings or instructions; posted in Issue #22 or the PR, or forwarded by the owner):
+
+```
+Agent: GPT
+Task: <task ID>
+PR: <number>
+head_sha: <the exact SHA that was checked>
+CI checked: <run id> — <conclusion>
+Verdict: ACCEPTED | REJECTED | NO VERDICT (<reason>)
+Proven: <claims with evidence>
+Not proven: <claims and what is missing>
+Findings: <numbered, each with file and line, or "none">
+Owner decision needed: <none | the exact question>
+Owner decision given: <none | the decision, with date and who>
+Next SEQ: <one step, acceptance criteria, permissions it needs>
+```
+
+Rules: a block about a different `head_sha` than the PR's current head is stale and changes nothing. "Owner decision given" counts only when the owner wrote it himself; a summary by an agent is not his approval. Claude answers in the `AGENTS.md` report format.
+
 ## Keeping this file current
 
 Claude updates the status table in the same PR as the change that produces new evidence, or in a small docs PR after an observation, always with the SHA, run id or comment id. A role changes only by the owner's decision, recorded here with its date.
