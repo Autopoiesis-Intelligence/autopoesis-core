@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, feat/ci-restore-task-queue-artifact, integration/queue-restore-history-validation]
+    branches: [main, feat/ci-restore-task-queue-artifact, integration/queue-restore-history-validation, claude/cl-020-a10-cycle]
   workflow_dispatch:
     inputs:
       restore_run_id:
@@ -229,6 +229,9 @@ jobs:
         run: |
           echo "Injected restore fault '${{ inputs.restore_fault }}' was NOT rejected by snapshot validation." >&2
           exit 1
+      - name: Validate scheduled workflow YAML syntax
+        run: |
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/autopoiesis-cycle.yml", aliases: true); puts "Scheduled workflow YAML parsed successfully."'
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
