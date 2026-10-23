@@ -561,8 +561,11 @@ def recover_expired_leases(queue: dict[str, Any], *, now: datetime | None = None
     return {"queue": updated, "recovered": recovered}
 
 
-def select_next_task(queue: dict[str, Any]) -> dict[str, Any]:
-    """Deterministically choose one OPEN item and explain every deferral; never mutates."""
+def select_next_task(queue: dict[str, Any], types: frozenset[str] | None = None) -> dict[str, Any]:
+    """Deterministically choose one OPEN item and explain every deferral; never mutates.
+
+    With `types`, only items of those types are eligible, so a runner never takes work it cannot execute.
+    """
     items = sorted(queue.get("items", []), key=lambda item: item["id"])
     active = [item["id"] for item in items if item.get("status") in {"SELECTED", "IN_PROGRESS"}]
     if active:
@@ -572,7 +575,9 @@ def select_next_task(queue: dict[str, Any]) -> dict[str, Any]:
     for item in items:
         if item.get("status") != "OPEN":
             continue
-        if item.get("attempts", 0) >= MAX_ATTEMPTS:
+        if types is not None and item.get("type") not in types:
+            deferred.append({"id": item["id"], "reason": f"no handler for type {item.get('type')!r}"})
+        elif item.get("attempts", 0) >= MAX_ATTEMPTS:
             deferred.append({"id": item["id"], "reason": "attempt limit reached"})
         elif not all(isinstance(item.get(key), str) and item[key].strip() for key in ("source", "evidence")):
             deferred.append({"id": item["id"], "reason": "insufficient evidence: needs source and evidence"})
@@ -599,13 +604,18 @@ def select_next_task(queue: dict[str, Any]) -> dict[str, Any]:
 
 
 def select_next_task_file(
-    path: Path, owner: str, *, now: datetime | None = None, ttl: timedelta = LEASE_TTL
+    path: Path,
+    owner: str,
+    *,
+    now: datetime | None = None,
+    ttl: timedelta = LEASE_TTL,
+    types: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Select the next task and lease it to `owner`; no eligible work leaves the file untouched."""
     lease = None
     with queue_write_lock(path):
         queue = load_queue(path)
-        selection = select_next_task(queue)
+        selection = select_next_task(queue, types)
         if selection["selected"] is not None:
             result = advance_task(
                 queue, selection["selected"], "SELECTED", f"selected by {owner}: {selection['reason']}",

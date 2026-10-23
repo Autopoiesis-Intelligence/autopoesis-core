@@ -1,0 +1,188 @@
+"""A10: the bounded unattended cycle, through the real queue file and runner entry point."""
+
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import textwrap
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from autopoesis.executor import source_tree_digest
+from autopoesis.orchestrator import HANDLERS, run_cycle
+from autopoesis.task_queue import (
+    LEASE_TTL,
+    advance_task_file,
+    load_queue,
+    recover_expired_leases_file,
+    select_next_task_file,
+    update_queue_file,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = "autopoesis/core.py"
+
+
+def task(task_id="TASK-1", task_type="verify_test_scaffold", source=SOURCE):
+    return {"id": task_id, "type": task_type, "source": source, "evidence": "orchestrator test"}
+
+
+def passing(item, root):
+    return {"verification_status": "PASS", "verification_level": "unit",
+            "revision": source_tree_digest(root / "autopoesis")}
+
+
+def failing(item, root):
+    raise RuntimeError("handler crashed")
+
+
+class OrchestratorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # A checkout without tests/, so the real scaffold handler has a module it may write a test for.
+        cls.checkout = tempfile.TemporaryDirectory()
+        cls.repo = Path(cls.checkout.name)
+        shutil.copytree(ROOT / "autopoesis", cls.repo / "autopoesis", ignore=shutil.ignore_patterns("__pycache__"))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.checkout.cleanup()
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.dir = Path(temporary.name)
+        self.path = self.dir / "TASK_QUEUE.json"
+
+    def item(self, task_id="TASK-1"):
+        return next(entry for entry in load_queue(self.path)["items"] if entry["id"] == task_id)
+
+    def events(self, kind):
+        return [e for e in load_queue(self.path)["history"] if e["event"] == kind]
+
+    def test_full_cycle_runs_the_real_handler_to_done(self):
+        update_queue_file(self.path, [task()])
+        result = run_cycle(self.path, "runner", self.repo)
+        self.assertEqual((result["status"], result["final"], result["verification"]), ("COMPLETED", "DONE", "PASS"))
+        self.assertEqual(self.item()["status"], "DONE")
+        self.assertNotIn("lease", self.item())
+        steps = [e["to"] for e in self.events("STATUS_CHANGED")]
+        self.assertEqual(steps, ["SELECTED", "IN_PROGRESS", "DONE"])
+        self.assertEqual(self.events("VERIFICATION_RECORDED")[0]["verification_level"],
+                         "GENERATED_TEST_EXECUTION")
+
+    def test_empty_queue_and_disable_switch_write_nothing(self):
+        update_queue_file(self.path, [task(task_type="proposal")])
+        before = self.path.read_bytes()
+        result = run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing})
+        self.assertEqual(result["status"], "NO_WORK")
+        self.assertEqual(self.path.read_bytes(), before)
+
+        update_queue_file(self.path, [task("TASK-2")])
+        before = self.path.read_bytes()
+        switch = self.dir / "DISABLED"
+        switch.write_text("paused", encoding="utf-8")
+        result = run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing}, disable_path=switch)
+        self.assertEqual(result["status"], "DISABLED")
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_only_allowlisted_types_are_selected(self):
+        update_queue_file(self.path, [task("A-PROPOSAL", task_type="proposal"), task("B-RUNNABLE")])
+        result = run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing})
+        self.assertEqual(result["task_id"], "B-RUNNABLE")
+        self.assertEqual(self.item("A-PROPOSAL")["status"], "OPEN")
+        self.assertEqual(set(HANDLERS), {"verify_test_scaffold"})
+
+    def test_handler_failure_retries_then_rejects_at_the_attempt_limit(self):
+        update_queue_file(self.path, [task()])
+        finals = [run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": failing})["final"]
+                  for _ in range(3)]
+        self.assertEqual(finals, ["OPEN", "OPEN", "REJECTED"])
+        self.assertEqual(self.item()["attempts"], 3)
+        self.assertEqual([e["verification_status"] for e in self.events("VERIFICATION_RECORDED")], ["FAIL"] * 3)
+        self.assertEqual(run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": failing})["status"],
+                         "NO_WORK")
+
+    def test_completed_task_is_not_run_twice(self):
+        update_queue_file(self.path, [task()])
+        run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing})
+        before = self.path.read_bytes()
+        self.assertEqual(run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing})["status"],
+                         "NO_WORK")
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_timeout_releases_the_task_without_evidence(self):
+        update_queue_file(self.path, [task()])
+        ticks = iter([0.0, 1000.0])
+        result = run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing},
+                           budget_seconds=10, clock=lambda: next(ticks))
+        self.assertEqual((result["status"], result["final"]), ("TIMED_OUT", "OPEN"))
+        self.assertEqual(self.item()["status"], "OPEN")
+        self.assertFalse(self.events("VERIFICATION_RECORDED"))
+
+    def test_expired_lease_is_recovered_before_selection(self):
+        update_queue_file(self.path, [task()])
+        stale = select_next_task_file(self.path, "crashed-runner",
+                                      now=datetime.now(timezone.utc) - LEASE_TTL - timedelta(minutes=1))
+        self.assertIsNotNone(stale["lease"])
+        result = run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing})
+        self.assertEqual(result["recovered"], ["TASK-1"])
+        self.assertEqual((result["status"], result["final"]), ("COMPLETED", "DONE"))
+
+    def test_stale_worker_cannot_record_or_complete_after_reassignment(self):
+        update_queue_file(self.path, [task()])
+        later = datetime.now(timezone.utc) + LEASE_TTL + timedelta(hours=1)
+
+        def overtaken(item, root):
+            # While this worker runs, its lease expires and another executor takes the task.
+            recover_expired_leases_file(self.path, now=later)
+            token = advance_task_file(self.path, "TASK-1", "SELECTED", owner="other", now=later)["lease"]["token"]
+            advance_task_file(self.path, "TASK-1", "IN_PROGRESS", token=token, now=later)
+            return passing(item, root)
+
+        result = run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": overtaken})
+        self.assertEqual(result["status"], "REFUSED")
+        self.assertIn("STALE_LEASE", result["reason"])
+        self.assertEqual(self.item()["status"], "IN_PROGRESS")
+        self.assertEqual(self.item()["lease"]["owner"], "other")
+        self.assertFalse(self.events("VERIFICATION_RECORDED"))
+
+    def test_two_runner_processes_never_both_execute(self):
+        update_queue_file(self.path, [task()])
+        marker = self.dir / "executions"
+        script = textwrap.dedent("""
+            import sys, time
+            from pathlib import Path
+            from autopoesis.executor import source_tree_digest
+            from autopoesis.orchestrator import run_cycle
+            queue, marker, owner = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+            def slow(item, root):
+                with marker.open("a") as handle:
+                    handle.write(owner + "\\n")
+                time.sleep(1)
+                return {"verification_status": "PASS", "verification_level": "unit",
+                        "revision": source_tree_digest(root / "autopoesis")}
+            print(run_cycle(queue, owner, Path("."), handlers={"verify_test_scaffold": slow})["status"])
+        """)
+        runners = [subprocess.Popen([sys.executable, "-c", script, str(self.path), str(marker), owner],
+                                    cwd=ROOT, stdout=subprocess.PIPE, text=True) for owner in ("one", "two")]
+        statuses = sorted(runner.communicate(timeout=60)[0].strip() for runner in runners)
+        self.assertEqual(statuses, ["COMPLETED", "NO_WORK"])
+        self.assertEqual(len(marker.read_text(encoding="utf-8").splitlines()), 1)
+        self.assertEqual(self.item()["status"], "DONE")
+
+    def test_command_line_entry_point_runs_one_cycle(self):
+        update_queue_file(self.path, [task()])
+        completed = subprocess.run(
+            [sys.executable, "-m", "autopoesis.orchestrator", "--queue", str(self.path), "--owner", "ci",
+             "--root", str(self.repo)],
+            cwd=ROOT, capture_output=True, text=True, timeout=120, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout)["final"], "DONE")
+
+
+if __name__ == "__main__":
+    unittest.main()
