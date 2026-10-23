@@ -80,7 +80,10 @@ def build_recovery_proposal(evidence: Any) -> dict[str, Any]:
         return _blocked("Newest run has no valid lowercase head SHA", latest_run_id=run_id)
     if latest.get("event") not in {"schedule", "workflow_dispatch"}:
         return _blocked("Newest run has an unexpected trigger event", latest_run_id=run_id)
-    if latest.get("repository") != repository:
+    run_repository = latest.get("repository")
+    if isinstance(run_repository, dict):
+        run_repository = run_repository.get("full_name")
+    if run_repository != repository:
         return _blocked("Newest run repository does not match evidence repository", latest_run_id=run_id)
 
     matching = [
