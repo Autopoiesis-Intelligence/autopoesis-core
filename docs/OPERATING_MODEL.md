@@ -64,7 +64,7 @@ Live GitHub state (refs, SHAs, runs) outranks every document and every chat summ
 6. **Owner decision.** A PR labelled `ready-for-owner` (valid `ACCEPTED` on the current head and green CI) is brought to the owner with its exact SHA. Only the owner merges.
 7. **Record.** After the merge, Claude marks the task `DONE` in `docs/PLAN.md` with the merge SHA and the CI run on it.
 
-While a PR waits for an audit, work that does not depend on it continues. At most 5 own Claude PRs wait at once (owner, 2026-10-23); beyond that a finished branch is kept and recorded in the plan instead of opened as a PR.
+While a PR waits for an audit, work that does not depend on it continues. The open PR limit is set only in `AGENTS.md` ("Open PR limit").
 
 ## The self-update cycle, stage by stage
 
