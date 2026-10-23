@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -106,6 +108,43 @@ def validate_queue_snapshot(
         "task_queue_sha256": actual_digest,
         "task_queue_size_bytes": len(snapshot),
     }
+
+
+
+def install_validated_queue_snapshot(
+    snapshot_path: Path,
+    destination_path: Path,
+    *,
+    expected_queue: Any,
+) -> dict[str, Any]:
+    """Stage, validate, and atomically replace the destination queue file."""
+    if not snapshot_path.is_file():
+        raise ValueError("Queue snapshot file is missing")
+    destination_path = Path(destination_path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination_path.name}.restore-",
+        suffix=".tmp",
+        dir=destination_path.parent,
+    )
+    staged = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(snapshot_path.read_bytes())
+            output.flush()
+            os.fsync(output.fileno())
+        staged_queue = load_queue(staged)
+        if staged_queue != expected_queue:
+            raise ValueError("Staged queue does not match the validated source snapshot")
+        os.replace(staged, destination_path)
+        installed_queue = load_queue(destination_path)
+        if installed_queue != expected_queue:
+            raise ValueError("Installed queue does not match the validated source snapshot")
+        return {
+            "queue": installed_queue,
+            "size_bytes": destination_path.stat().st_size,
+        }
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def validate_restore_source_run(
