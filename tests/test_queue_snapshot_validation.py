@@ -315,7 +315,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
 
         bound = bind_source_artifact(
             source,
-            {"artifacts": [artifact]},
+            self._artifact_payload([artifact]),
             requested_run_id=12345,
         )
 
@@ -338,25 +338,50 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             "size_in_bytes": 4096,
         }
         cases = (
-            ({"artifacts": []}, "exactly one"),
-            ({"artifacts": [{**artifact, "expired": True}]}, "exactly one"),
-            ({"artifacts": [artifact, artifact]}, "exactly one"),
-            (
-                {"artifacts": [{**artifact, "workflow_run": {"id": 999, "head_sha": "a" * 40}}]},
-                "not bound",
-            ),
-            (
-                {"artifacts": [{**artifact, "workflow_run": {"id": 12345, "head_sha": "c" * 40}}]},
-                "head SHA",
-            ),
-            ({"artifacts": [{**artifact, "digest": "sha256:invalid"}]}, "valid SHA-256"),
-            ({"artifacts": [{**artifact, "size_in_bytes": "4096"}]}, "valid size"),
+            ([], "exactly one"),
+            ([{**artifact, "expired": True}], "exactly one"),
+            ([{**artifact, "id": 67891}], "exactly one"),
+            ([{**artifact, "workflow_run": {"id": 999, "head_sha": "a" * 40}}], "not bound"),
+            ([{**artifact, "workflow_run": {"id": 12345, "head_sha": "c" * 40}}], "head SHA"),
+            ([{**artifact, "digest": "sha256:invalid"}], "valid SHA-256"),
+            ([{**artifact, "size_in_bytes": "4096"}], "valid size"),
         )
 
-        for payload, message in cases:
+        for artifacts, message in cases:
+            payload = self._artifact_payload(artifacts)
             with self.subTest(payload=payload), self.assertRaisesRegex(ValueError, message):
                 bind_source_artifact(source, payload, requested_run_id=12345)
 
+    def test_source_artifact_requires_complete_pagination_evidence(self):
+        source = validate_restore_source_run(
+            self._valid_source_run(),
+            requested_run_id=12345,
+            expected_repository="Autopoiesis-Intelligence/autopoesis-core",
+        )
+        with self.assertRaisesRegex(ValueError, "lacks complete observed pagination"):
+            bind_source_artifact(
+                source, {"artifacts": []}, requested_run_id=12345
+            )
+
+    def _artifact_payload(self, artifacts):
+        page = {
+            "page": 1,
+            "per_page": 100,
+            "total_count": len(artifacts),
+            "next_page": None,
+            "request_url": "https://api.github.com/repos/example/repo/actions/runs/12345/artifacts?per_page=100&page=1",
+            "link_header": None,
+            "artifacts": artifacts,
+        }
+        return {
+            "artifacts": artifacts,
+            "total_count": len(artifacts),
+            "pagination_evidence": {
+                "complete": True,
+                "page_count": 1,
+                "pages": [page],
+            },
+        }
 
     def _dispatch_run(self, run_id, **overrides):
         run = {
