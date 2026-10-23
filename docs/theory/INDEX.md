@@ -51,6 +51,8 @@ Two scales exist and must not be mixed.
 
 **Evidence level** (`AGENTS.md`, for implementation claims): `DESIGN`, `IMPLEMENTED`, `REACHABLE`, `RUNTIME`, `PERSISTED`, `AUDITED`, `CI_PROVEN`, always with an exact SHA.
 
+Other vocabularies exist in the older repositories: Gnosis `research/INDEX.md` (12 statuses from `RESEARCH` to `SUPERSEDED`), Gnosis `CLAIMS.md`, and Gnosis-Memory records (`FORMALIZED`, `OPEN`, `HISTORICAL`, `IMPLEMENTED_PENDING_RUNTIME_VERIFICATION`). When citing such a record, quote its status as written and give this base's status separately; never translate one into the other silently. Which registry is canonical is OQ-008.
+
 A claim about the theory uses a knowledge status. A claim that something works in the code also names its evidence level and SHA in THEORY_TO_CODE.md. The word `ACCEPTED` here is not an audit verdict (`Verdict: ACCEPTED` in `AGENTS.md`); see OQ-004.
 
 ## Claim kinds

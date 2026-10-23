@@ -59,3 +59,19 @@ Entry fields: `Question`, `Why it matters`, `Options`, `Who decides`, `Blocks`, 
 - Who decides: the owner.
 - Blocks: nothing; it affects how stable the citations are.
 - Status: UNRESOLVED
+
+### OQ-008 — Which claims registry is canonical?
+- Question: three registries already exist outside this repository: 183 claim records `C-0001`…`C-0183` in Gnosis-Memory `research_machine/records/` at `7a77642`, `CLAIMS.md` and the record schema in `research/INDEX.md` in Gnosis at `935233c`, and Gnosis-Knowledge at `13beebb`, whose README describes this same role but holds no content.
+- Why it matters: a fourth parallel registry repeats the drift that stalled Gnosis. All 183 Gnosis-Memory records are `FORMALIZED`, `RESEARCH_ONLY` and have `evidence: []`; their sources are lines of an internal chat-derived file (`AI_CONTEXT.md`), not external literature.
+- Options: keep this folder as the core's small working base and cite outside records as `Gnosis-Memory:C-0025@7a77642` only when a task needs one (recommended); import selected records with a re-check; move the base to Gnosis-Knowledge.
+- Who decides: the owner.
+- Blocks: importing outside records.
+- Status: UNRESOLVED
+
+### OQ-009 — Is human approval part of the target loop or outside it?
+- Question: Gnosis `PHILOSOPHY.md` and `CLAIMS.md` §E (at `935233c`) reject a permanent external selector or human confirmation as a necessary part of the endogenous core, and Gnosis-Core `docs/MASTER_SPEC.md` §2–3 (at `a209a96`) says the test is not an external operator. Gnosis-Memory `FINAL_PRODUCT_TZ_R2.md` §17 (at `7a77642`) keeps human governance at promotion boundaries. In this repository only the owner merges (`AGENTS.md`).
+- Why it matters: it decides what A10–A12 must prove, and whether an external auditor is a permanent part of the product or scaffolding for the development loop.
+- Options: endogenous selection inside the core with human governance only at promotion to the outside world; human approval as a permanent stage; human approval removed after a proven trial. SRC-007 (not checked) argues that a policy judging itself is a risk, which counts against full endogeneity.
+- Who decides: the owner.
+- Blocks: acceptance criteria for A10–A12.
+- Status: UNRESOLVED
