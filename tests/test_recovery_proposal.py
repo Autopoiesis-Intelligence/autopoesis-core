@@ -82,6 +82,20 @@ class RecoveryProposalTests(unittest.TestCase):
                     evidence["artifacts"][0]["snapshot_size_bytes"] = observed_size
                 self.assertEqual(build_recovery_proposal(evidence)["status"], "BLOCKED")
 
+    def test_wrong_workflow_path_blocks(self):
+        evidence = valid_evidence()
+        evidence["runs"][0]["path"] = ".github/workflows/autopoiesis-cycle.yml@refs/heads/main"
+        result = build_recovery_proposal(evidence)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("No evidence", result["reason"])
+
+    def test_wrong_artifact_name_blocks(self):
+        evidence = valid_evidence()
+        evidence["artifacts"][0]["name"] = "autopoiesis-cycle-state"
+        result = build_recovery_proposal(evidence)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("no state artifact", result["reason"])
+
     def test_no_evidence_blocks(self):
         result = build_recovery_proposal({"repository": REPO, "history_complete": True, "runs": [], "artifacts": []})
         self.assertEqual(result["status"], "BLOCKED")
