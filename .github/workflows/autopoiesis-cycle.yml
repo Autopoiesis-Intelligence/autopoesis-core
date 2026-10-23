@@ -39,7 +39,7 @@ jobs:
           set -euo pipefail
           gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/autopoiesis-cycle.yml/runs?branch=main&status=completed&per_page=100" > .cycle-runs.json
           python - <<'PY'
-          import json, os
+          import json, os, re
           from pathlib import Path
           payload = json.loads(Path(".cycle-runs.json").read_text())
           current = int(os.environ["GITHUB_RUN_ID"])
@@ -58,8 +58,8 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               if prior:
                   run = prior[0]
-                  if not isinstance(run.get("head_sha"), str) or len(run["head_sha"]) != 40:
-                      raise SystemExit("Refusing: source run has no valid head SHA")
+                  if not isinstance(run.get("head_sha"), str) or not re.fullmatch(r"[0-9a-f]{40}", run["head_sha"]):
+                      raise SystemExit("Refusing: source run has no valid lowercase SHA-1 head SHA")
                   f.write(f"source_run_id={run['id']}\n")
                   f.write(f"source_head_sha={run['head_sha']}\n")
                   print(f"Selected prior run {run['id']} at {run['head_sha']}.")
