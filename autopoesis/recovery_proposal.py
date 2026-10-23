@@ -36,7 +36,7 @@ def build_recovery_proposal(evidence: Any) -> dict[str, Any]:
       {"repository": "owner/repo", "runs": [run metadata, ...],
        "artifacts": [{"run_id": 123, "name": ..., "expired": false,
          "digest": "sha256:<64 hex>", "manifest": {...},
-         "snapshot_sha256": "<64 hex>"}]}
+         "snapshot_sha256": "<64 hex>", "snapshot_size_bytes": 256}]}
 
     The snapshot hash is optional because artifact metadata alone cannot prove
     the queue bytes inside an archive. If absent, the result remains blocked
@@ -125,6 +125,11 @@ def build_recovery_proposal(evidence: Any) -> dict[str, Any]:
         return _blocked("Queue bytes have not been independently hashed", latest_run_id=run_id)
     if observed != queue_digest:
         return _blocked("Observed queue digest conflicts with manifest", latest_run_id=run_id)
+    observed_size = artifact.get("snapshot_size_bytes")
+    if type(observed_size) is not int or observed_size < 0:
+        return _blocked("Queue bytes have not been independently sized", latest_run_id=run_id)
+    if observed_size != size:
+        return _blocked("Observed queue size conflicts with manifest", latest_run_id=run_id)
 
     return {
         "status": "PROPOSAL_READY",
