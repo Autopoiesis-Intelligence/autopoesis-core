@@ -210,6 +210,31 @@ def bind_source_artifact(
     }
 
 
+def _require_complete_workflow_run_history(runs_payload: Any) -> list[dict[str, Any]]:
+    """Require captured pagination evidence before history can authorize restore."""
+    if not isinstance(runs_payload, dict):
+        raise ValueError("Workflow runs response must be a JSON object")
+    runs = runs_payload.get("workflow_runs")
+    if not isinstance(runs, list):
+        raise ValueError("Workflow runs response must contain a workflow_runs array")
+    evidence = runs_payload.get("pagination_evidence")
+    if not isinstance(evidence, dict) or evidence.get("complete") is not True:
+        raise ValueError("Workflow run history lacks complete observed pagination evidence")
+    pages = evidence.get("pages")
+    page_count = evidence.get("page_count")
+    if type(page_count) is not int or not isinstance(pages, list) or page_count != len(pages):
+        raise ValueError("Workflow run pagination evidence has an invalid page count")
+    from .github_pagination import validate_paginated_collection
+    captured_records = validate_paginated_collection(
+        pages,
+        collection_key="workflow_runs",
+        expected_page_size=100,
+    )
+    if captured_records != runs:
+        raise ValueError("Workflow run records differ from captured pagination evidence")
+    return runs
+
+
 def latest_source_run_id(
     runs_payload: Any,
     *,
@@ -222,9 +247,7 @@ def latest_source_run_id(
         raise ValueError("Current branch must be a non-empty string")
     if not isinstance(runs_payload, dict):
         raise ValueError("Workflow runs response must be a JSON object")
-    runs = runs_payload.get("workflow_runs")
-    if not isinstance(runs, list):
-        raise ValueError("Workflow runs response must contain a workflow_runs array")
+    runs = _require_complete_workflow_run_history(runs_payload)
 
     current_id = int(_run_id_text(current_run_id))
     candidates = []
