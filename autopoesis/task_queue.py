@@ -191,11 +191,35 @@ def load_queue(path: Path) -> dict[str, Any]:
     # contradict that state. Histories may omit transitions for legacy items,
     # but when a transition exists, the final recorded destination must match
     # the persisted item status.
+    # Every recorded edge must also be one advance_task could have made, so a
+    # restored history cannot carry a completion that skipped the PASS gate.
+    sources = {item["id"]: item.get("source") for item in queue["items"]}
     latest_status: dict[str, str] = {}
+    replayed_attempts: dict[str, int] = {}
+    latest_verification: dict[str, str | None] = {}
     for event in queue["history"]:
+        task_id = event.get("task_id")
+        if event.get("event") == "VERIFICATION_RECORDED":
+            bound = (
+                event.get("source") is not None
+                and event.get("source") == sources.get(task_id)
+                and event.get("attempt") == replayed_attempts.get(task_id)
+            )
+            latest_verification[task_id] = event["verification_status"] if bound else None
+            continue
         if event.get("event") != "STATUS_CHANGED":
             continue
-        task_id = event["task_id"]
+        if event["to"] not in ALLOWED_TRANSITIONS.get(event["from"], frozenset()):
+            raise EvolutionError(
+                f"Queue history has an illegal transition for task {task_id!r}: {event['from']!r} -> {event['to']!r}"
+            )
+        if event["to"] == "IN_PROGRESS":
+            replayed_attempts[task_id] = replayed_attempts.get(task_id, 0) + 1
+            latest_verification[task_id] = None
+        if event["to"] == "DONE" and latest_verification.get(task_id) != "PASS":
+            raise EvolutionError(
+                f"Queue history completes task {task_id!r} without a PASS for its source in that attempt"
+            )
         previous_destination = latest_status.get(task_id)
         if previous_destination is not None and event["from"] != previous_destination:
             raise EvolutionError(
@@ -428,6 +452,8 @@ def record_verification_file(
         raise EvolutionError("Verification source must be a non-empty string")
     if revision is not None and not _is_digest(revision):
         raise EvolutionError("Verification revision must be a lowercase SHA-256 hex digest")
+    if attempt is not None and (type(attempt) is not int or attempt < 1):
+        raise EvolutionError("Verification attempt must be a positive integer")
 
     with queue_write_lock(path):
         queue = load_queue(path)
