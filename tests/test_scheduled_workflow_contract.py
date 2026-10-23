@@ -55,6 +55,8 @@ class ScheduledWorkflowContractTests(unittest.TestCase):
         self.assertIn("status=completed&per_page=100", self.source)
         self.assertIn("gh api --paginate --slurp", self.source)
         self.assertIn("from autopoesis.scheduled_state import select_prior_successful_run", self.source)
+        selector = (Path(__file__).resolve().parents[1] / "autopoesis" / "scheduled_state.py").read_text(encoding="utf-8")
+        self.assertIn('run.get("run_attempt", 1) == 1', selector)
         self.assertIn("pages = json.loads(Path(\".cycle-runs-pages.json\").read_text())", self.source)
         self.assertIn("conclusion", self.source)
         self.assertIn("source_run_id", self.source)
