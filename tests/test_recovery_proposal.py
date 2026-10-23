@@ -12,6 +12,7 @@ ARCHIVE_DIGEST = "sha256:" + "c" * 64
 def valid_evidence():
     return {
         "repository": REPO,
+        "history_complete": True,
         "runs": [{
             "id": 123, "run_number": 12, "run_attempt": 1,
             "head_branch": "main",
@@ -41,8 +42,15 @@ class RecoveryProposalTests(unittest.TestCase):
         self.assertFalse(result["applied"])
         self.assertEqual(result["actions_taken"], [])
 
+    def test_incomplete_history_blocks_even_with_successful_snapshot(self):
+        evidence = valid_evidence()
+        evidence["history_complete"] = False
+        result = build_recovery_proposal(evidence)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("history completeness", result["reason"])
+
     def test_no_evidence_blocks(self):
-        result = build_recovery_proposal({"repository": REPO, "runs": [], "artifacts": []})
+        result = build_recovery_proposal({"repository": REPO, "history_complete": True, "runs": [], "artifacts": []})
         self.assertEqual(result["status"], "BLOCKED")
         self.assertIn("No evidence", result["reason"])
 
