@@ -67,48 +67,7 @@ jobs:
               with open(os.environ["GITHUB_OUTPUT"], "a") as f:
                   f.write("source_run_id=bootstrap\n")
           PY
-          if [[ "${{ steps.state.outputs.source_run_id }}" != "bootstrap" ]]; then
-            SOURCE_RUN_ID="${{ steps.state.outputs.source_run_id }}"
-            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" > .cycle-source.json
-            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" > .cycle-artifacts.json
-            python - <<'PY'
-          import json, os, re
-          from pathlib import Path
-          run = json.loads(Path(".cycle-source.json").read_text())
-          artifacts_payload = json.loads(Path(".cycle-artifacts.json").read_text())
-          expected_repo = os.environ["GITHUB_REPOSITORY"]
-          if run.get("conclusion") != "success" or run.get("head_branch") != "main":
-              raise SystemExit("Refusing: previous run is not successful on main")
-          if run.get("path", "").split("@", 1)[0] != ".github/workflows/autopoiesis-cycle.yml":
-              raise SystemExit("Refusing: source run belongs to another workflow")
-          if run.get("event") not in {"schedule", "workflow_dispatch"}:
-              raise SystemExit("Refusing: source run has an unexpected event")
-          repo = run.get("repository", {})
-          if not isinstance(repo, dict) or repo.get("full_name") != expected_repo:
-              raise SystemExit("Refusing: source run repository mismatch")
-          sha = run.get("head_sha")
-          if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
-              raise SystemExit("Refusing: source run SHA invalid")
-          artifacts = artifacts_payload.get("artifacts")
-          if not isinstance(artifacts, list):
-              raise SystemExit("Refusing: artifacts response malformed")
-          matches = [a for a in artifacts if isinstance(a, dict) and a.get("name") == "autopoiesis-cycle-state" and not a.get("expired", True)]
-          if len(matches) != 1:
-              raise SystemExit("Refusing: source must have exactly one unexpired state artifact")
-          artifact = matches[0]
-          binding = artifact.get("workflow_run")
-          if not isinstance(binding, dict) or str(binding.get("id")) != str(run.get("id")) or binding.get("head_sha") != sha:
-              raise SystemExit("Refusing: state artifact is not bound to source run and SHA")
-          if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(artifact.get("digest", ""))):
-              raise SystemExit("Refusing: state artifact digest missing or invalid")
-          Path("SOURCE_RUN_ID").write_text(str(run["id"]))
-          Path("SOURCE_HEAD_SHA").write_text(sha)
-          print(f"Verified source run {run['id']} at {sha}, artifact {artifact.get('id')}, digest {artifact['digest']}.")
-          PY
-            echo "source_head_sha=$(cat SOURCE_HEAD_SHA)" >> "$GITHUB_OUTPUT"
-            echo "source_run_id=$SOURCE_RUN_ID" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Download previous queue snapshot
+     - name: Download previous queue snapshot
         if: ${{ steps.state.outputs.source_run_id != 'bootstrap' }}
         uses: actions/download-artifact@v4
         with:
@@ -191,4 +150,47 @@ jobs:
           retention-days: 30
       - name: Propagate cycle refusal
         if: ${{ steps.cycle.outcome == 'failure' }}
-        run: exit 1
+        run: exit 1      - name: Verify source run and artifact
+        if: ${{ steps.state.outputs.source_run_id != 'bootstrap' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ steps.state.outputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" > .cycle-source.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" > .cycle-artifacts.json
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          run = json.loads(Path(".cycle-source.json").read_text())
+          artifacts_payload = json.loads(Path(".cycle-artifacts.json").read_text())
+          expected_repo = os.environ["GITHUB_REPOSITORY"]
+          if run.get("conclusion") != "success" or run.get("head_branch") != "main":
+              raise SystemExit("Refusing: previous run is not successful on main")
+          if run.get("path", "").split("@", 1)[0] != ".github/workflows/autopoiesis-cycle.yml":
+              raise SystemExit("Refusing: source run belongs to another workflow")
+          if run.get("event") not in {"schedule", "workflow_dispatch"}:
+              raise SystemExit("Refusing: source run has an unexpected event")
+          repo = run.get("repository", {})
+          if not isinstance(repo, dict) or repo.get("full_name") != expected_repo:
+              raise SystemExit("Refusing: source run repository mismatch")
+          sha = run.get("head_sha")
+          if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+              raise SystemExit("Refusing: source run SHA invalid")
+          artifacts = artifacts_payload.get("artifacts")
+          if not isinstance(artifacts, list):
+              raise SystemExit("Refusing: artifacts response malformed")
+          matches = [a for a in artifacts if isinstance(a, dict) and a.get("name") == "autopoiesis-cycle-state" and not a.get("expired", True)]
+          if len(matches) != 1:
+              raise SystemExit("Refusing: source must have exactly one unexpired state artifact")
+          artifact = matches[0]
+          binding = artifact.get("workflow_run")
+          if not isinstance(binding, dict) or str(binding.get("id")) != str(run.get("id")) or binding.get("head_sha") != sha:
+              raise SystemExit("Refusing: state artifact is not bound to source run and SHA")
+          if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(artifact.get("digest", ""))):
+              raise SystemExit("Refusing: state artifact digest missing or invalid")
+          Path("SOURCE_HEAD_SHA").write_text(sha)
+          print(f"Verified source run {run['id']} at {sha}, artifact {artifact.get('id')}, digest {artifact['digest']}.")
+          PY
+          echo "source_head_sha=$(cat SOURCE_HEAD_SHA)" >> "$GITHUB_OUTPUT"
+
