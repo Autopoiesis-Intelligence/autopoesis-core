@@ -30,7 +30,7 @@ Entry fields: `Kind`, `Status`, `Claim`, `Grounds`, `Counterarguments`, `Alterna
 - Kind: engineering
 - Status: HYPOTHESIZED
 - Claim: separating candidate generation, testing, selection and independent verification lowers the risk of accepting an erroneous change.
-- Grounds: proposed by GPT (owner's message, 2026-10-23) as an example entry. Related sources, not checked: SRC-004, SRC-005, SRC-007, SRC-008.
+- Grounds: proposed by GPT (owner's message, 2026-10-23) as an example entry. Related sources, partly checked 2026-10-23: SRC-008 classifies missing or incorrect verification as a failure category; SRC-007 argues that a policy producing its own evaluator undermines guarantees. Neither measures the effect of separating stages, so the claim stays HYPOTHESIZED.
 - Counterarguments: separate stages are not independent checks by themselves; a shared wrong assumption can pass every stage. A verifier that repeats the generator's reasoning adds no independence.
 - How to check: tests for verification bypass, stale results, races and illegal queue transitions; contracts between stages that the verifier cannot satisfy by copying the executor's result.
 - Links: CON-003, T2C-002, OQ-006.
@@ -52,12 +52,12 @@ Entry fields: `Kind`, `Status`, `Claim`, `Grounds`, `Counterarguments`, `Alterna
 - Kind: design
 - Status: ACCEPTED
 - Claim: progress is counted only as accepted, independently verified changes, not as task count, PASS count, queue status or a no-op.
-- Grounds: `AGENTS.md` rule 5 and `docs/AUTONOMY_ROADMAP_SPEC.md` A9 on `main` at `685c5a0`. Related, not checked: SRC-006 (endpoint scores hide regressions), SRC-007 (an evolving policy can influence its own evaluator).
+- Grounds: `AGENTS.md` rule 5 and `docs/AUTONOMY_ROADMAP_SPEC.md` A9 on `main` at `685c5a0`. Related, checked 2026-10-23 (see SOURCES.md): SRC-006 (endpoint scores hide regressions; selected updates fall short of the candidates), SRC-004 (an agent gamed its metric by removing the logging it was measured by), SRC-007 (an evolving policy produces its own evaluator).
 - Counterarguments: a strict count can hide useful partial work, such as a correct rejection.
 - Alternatives: count benchmark scores or completed tasks. Not adopted.
 - Risks: verification that is not truly independent makes the count misleading (CLM-003).
-- How to check: T2C-003.
-- Links: CON-007, T2C-003.
+- How to check: T2C-003. Contradiction observed on `main`: CLM-010.
+- Links: CON-007, T2C-003, CLM-010.
 - History: 2026-10-23 recorded (CL-016).
 
 ### CLM-006 — The core stores a task queue, not X/R
@@ -105,3 +105,13 @@ Entry fields: `Kind`, `Status`, `Claim`, `Grounds`, `Counterarguments`, `Alterna
 - How to check: T2C-006.
 - Links: CON-003, CON-007, OQ-009, T2C-006.
 - History: 2026-10-23 recorded (CL-016).
+
+### CLM-010 — On `main`, a task can be marked DONE without any verification
+- Kind: engineering
+- Status: OBSERVED
+- Claim: at `685c5a0`, `record_outcome_file` (reached by the `update_task_status` task type in `TASKS.json`) moves a queue item from `OPEN` to `DONE` with no verification record.
+- Grounds: run on 2026-10-23 against `685c5a0` code: a fresh queue item `T1` was set to `DONE` by `record_outcome_file(q, "T1", "DONE", "no verification")` and `load_queue` returned status `DONE`.
+- Counterarguments: `DONE` is not yet counted as progress anywhere in the code, so no false progress is reported today.
+- How to check: repeat the call on the current `main` head; after PR #33 (A3, open) it must be refused.
+- Links: CLM-005, T2C-003.
+- History: 2026-10-23 observed (CL-018).

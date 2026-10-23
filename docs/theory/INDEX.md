@@ -2,7 +2,7 @@
 
 This folder holds the project's theory: concepts, sources, claims, how they reach the code, and what is still open. It exists so that an agent can check the reasoning behind a task from the repository, without relying on chat history.
 
-**Status of this folder:** a skeleton (CL-016). The seed entries below come only from documents already in the project. No source listed here was re-opened when this skeleton was written (see `Checked:` in [SOURCES.md](SOURCES.md)). Do not treat the base as ready to use until the sources are checked and the links to the current architecture are reviewed.
+**Status of this folder:** a skeleton (CL-016). The seed entries below come only from documents already in the project. Five of the eight registered sources were opened on 2026-10-23, three of them only as generated summaries; the other three are not opened yet (see `Checked:` in [SOURCES.md](SOURCES.md)). Do not treat the base as ready to use until the sources are checked and the links to the current architecture are reviewed.
 
 ## Authority
 
