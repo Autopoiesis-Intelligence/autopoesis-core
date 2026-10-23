@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import multiprocessing
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -60,38 +61,44 @@ def _when_unlocked(call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     raise AssertionError("unreachable")
 
 
-def _run_handler(handler: Handler, item: dict[str, Any], root: Path, sender: Any) -> None:
+MAX_RESULT_BYTES = 4 * 1024 * 1024
+
+
+def _run_handler(handler: Handler, item: dict[str, Any], root: Path, result_path: Path) -> None:
     try:
         result = handler(item, root)
     except Exception as exc:  # A handler failure is the task's outcome, not the runner's crash.
         result = {"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
                   "detail": f"{type(exc).__name__}: {exc}"}
-    sender.send(result)
-    sender.close()
+    # Serialize inside the child, so slow or huge results are still under the parent's deadline.
+    partial = result_path.with_suffix(".partial")
+    partial.write_text(json.dumps(result, default=str), encoding="utf-8")
+    partial.replace(result_path)
 
 
 def _bounded(handler: Handler, item: dict[str, Any], root: Path, seconds: float) -> dict[str, Any] | None:
-    """Run the handler in a child process and kill it at the deadline; None means it ran out of time."""
+    """Run the handler in a child process and kill it at the deadline; None means it ran out of time.
+
+    The child writes its result to a file and exits; the parent only waits on the child, so nothing
+    the handler returns can keep the parent past the deadline.
+    """
     context = multiprocessing.get_context("fork")
-    receiver, sender = context.Pipe(duplex=False)
-    child = context.Process(target=_run_handler, args=(handler, item, root, sender), daemon=True)
-    child.start()
-    sender.close()  # The parent keeps only the read end, so a dead child shows up as EOF.
-    try:
-        # Read before joining: a child blocked on a full pipe would otherwise never exit.
-        if not receiver.poll(max(seconds, 0)):
-            return None
-        try:
-            return receiver.recv()
-        except EOFError:
-            child.join()
-            return {"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
-                    "detail": f"handler exited with code {child.exitcode} and no result"}
-    finally:
-        receiver.close()
+    with tempfile.TemporaryDirectory(prefix="autopoesis-cycle-") as directory:
+        result_path = Path(directory) / "result.json"
+        child = context.Process(target=_run_handler, args=(handler, item, root, result_path), daemon=True)
+        child.start()
+        child.join(max(seconds, 0))
         if child.is_alive():
             child.kill()
-        child.join()
+            child.join()
+            return None
+        if not result_path.is_file():
+            return {"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
+                    "detail": f"handler exited with code {child.exitcode} and no result"}
+        if result_path.stat().st_size > MAX_RESULT_BYTES:
+            return {"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
+                    "detail": f"handler result exceeds {MAX_RESULT_BYTES} bytes"}
+        return json.loads(result_path.read_text(encoding="utf-8"))
 
 
 def run_cycle(

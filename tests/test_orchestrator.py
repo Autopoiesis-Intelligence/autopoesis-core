@@ -139,6 +139,24 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing})["final"],
                          "DONE")
 
+    def test_slow_result_delivery_is_still_bounded(self):
+        update_queue_file(self.path, [task()])
+
+        class Slow:
+            def __str__(self):
+                time.sleep(60)
+                return "never"
+
+        def slow_result(item, root):
+            # The handler itself returns at once; only turning the result into bytes stalls.
+            return {**passing(item, root), "detail": Slow()}
+
+        started = time.monotonic()
+        result = run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": slow_result}, budget_seconds=1)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertEqual((result["status"], result["final"]), ("TIMED_OUT", "OPEN"))
+        self.assertFalse(self.events("VERIFICATION_RECORDED"))
+
     def test_large_result_and_silent_exit_are_classified_correctly(self):
         update_queue_file(self.path, [task("A-LARGE"), task("B-SILENT")])
 
