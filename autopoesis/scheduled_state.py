@@ -14,8 +14,8 @@ def select_prior_successful_run(
     """Select the newest successful main-branch cycle from all API pages.
 
     Refuse malformed history and refuse to roll back to an older snapshot when a
-    newer cycle failed or was rerun. The latter can have changed queue state
-    before failing, so replaying an older artifact is unsafe.
+    newer cycle failed or was rerun. Bootstrap is allowed only when no prior
+    cycle run exists at all, so a failed run cannot be silently discarded.
     """
     if not isinstance(pages, list) or not pages:
         raise ValueError("workflow runs history is incomplete or malformed")
@@ -42,11 +42,11 @@ def select_prior_successful_run(
         and run.get("run_attempt", 1) == 1
     ]
 
-    if prior and relevant and relevant[0] is not prior[0]:
+    if relevant and (not prior or relevant[0] is not prior[0]):
         latest = relevant[0]
         raise ValueError(
-            "Refusing to restore an older snapshot: newest cycle run "
-            f"{latest.get('id')} has conclusion={latest.get('conclusion')!r} "
+            "Refusing to restore or bootstrap after an unresolved prior cycle: "
+            f"newest run {latest.get('id')} has conclusion={latest.get('conclusion')!r} "
             f"and run_attempt={latest.get('run_attempt', 1)!r}"
         )
 
