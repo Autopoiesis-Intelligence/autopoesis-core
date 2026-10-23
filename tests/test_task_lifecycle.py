@@ -142,6 +142,20 @@ class TaskLifecycleTests(unittest.TestCase):
             record_verification_file(path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=1, token=token)
             self.assertEqual(load_queue(path)["history"][-1]["source"], SOURCE)
 
+    def test_verification_attempt_must_be_a_real_integer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [{"id": "TASK-1", "type": "proposal", "source": SOURCE}])
+            advance_task_file(path, "TASK-1", "SELECTED")
+            advance_task_file(path, "TASK-1", "IN_PROGRESS")
+            before = path.read_bytes()
+            for attempt in (True, 1.0, "1", 0):
+                with self.subTest(attempt=attempt):
+                    with self.assertRaisesRegex(EvolutionError, "attempt must be a positive integer"):
+                        record_verification_file(path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=attempt)
+            self.assertEqual(path.read_bytes(), before)
+            load_queue(path)
+
     def test_queue_module_exposes_no_unchecked_status_writer(self):
         import autopoesis.task_queue as task_queue
         self.assertFalse(hasattr(task_queue, "record_outcome"))

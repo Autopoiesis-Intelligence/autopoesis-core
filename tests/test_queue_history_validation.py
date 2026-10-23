@@ -127,7 +127,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
                     "event": "STATUS_CHANGED",
                     "task_id": "TASK-1",
                     "from": "OPEN",
-                    "to": "DONE",
+                    "to": "SELECTED",
                     "note": "first transition",
                     "at": "2026-01-01T00:00:00+00:00",
                 },
@@ -135,7 +135,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
                     "event": "STATUS_CHANGED",
                     "task_id": "TASK-1",
                     "from": "OPEN",
-                    "to": "DONE",
+                    "to": "SELECTED",
                     "note": "invalid second transition starts from old state",
                     "at": "2026-01-01T00:00:01+00:00",
                 },
@@ -147,10 +147,51 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "event": "STATUS_CHANGED",
                 "task_id": "TASK-1",
                 "from": "OPEN",
-                "to": "OPEN",
-                "note": "history claims OPEN",
+                "to": "SELECTED",
+                "note": "history claims SELECTED",
                 "at": "2026-01-01T00:00:00+00:00",
             }]))
+
+    def test_rejects_history_edges_outside_the_transition_table(self):
+        for start, end in (("OPEN", "DONE"), ("DONE", "OPEN"), ("REJECTED", "SELECTED"), ("OPEN", "OPEN")):
+            with self.subTest(edge=f"{start}->{end}"):
+                with self.assertRaisesRegex(EvolutionError, "illegal transition"):
+                    load_queue(self._write_queue([{
+                        "event": "STATUS_CHANGED", "task_id": "TASK-1", "from": start, "to": end,
+                        "note": "forged", "at": "2026-01-01T00:00:00+00:00",
+                    }]))
+
+    def test_rejects_history_completion_without_a_bound_pass(self):
+        def edge(start, end, second):
+            return {"event": "STATUS_CHANGED", "task_id": "TASK-1", "from": start, "to": end,
+                    "note": "", "at": f"2026-01-01T00:00:0{second}+00:00"}
+
+        def verification(status, attempt, source="tests/example.py"):
+            return {"event": "VERIFICATION_RECORDED", "task_id": "TASK-1", "verification_status": status,
+                    "verification_level": "unit", "artifact_sha256": None, "source": source,
+                    "attempt": attempt, "at": "2026-01-01T00:00:03+00:00"}
+
+        walk = [edge("OPEN", "SELECTED", 1), edge("SELECTED", "IN_PROGRESS", 2)]
+        cases = {
+            "no evidence": walk,
+            "FAIL": walk + [verification("FAIL", 1)],
+            "other source": walk + [verification("PASS", 1, source="other.py")],
+            "earlier attempt": walk + [verification("PASS", 1), edge("IN_PROGRESS", "OPEN", 3),
+                                       edge("OPEN", "SELECTED", 3), edge("SELECTED", "IN_PROGRESS", 3)],
+        }
+        for label, events in cases.items():
+            with self.subTest(label):
+                path = self._write_queue(events + [edge("IN_PROGRESS", "DONE", 4)])
+                queue = json.loads(path.read_text(encoding="utf-8"))
+                queue["items"][0].update({"source": "tests/example.py", "attempts": 1})
+                path.write_text(json.dumps(queue), encoding="utf-8")
+                with self.assertRaisesRegex(EvolutionError, "without a PASS"):
+                    load_queue(path)
+        path = self._write_queue(walk + [verification("PASS", 1), edge("IN_PROGRESS", "DONE", 4)])
+        queue = json.loads(path.read_text(encoding="utf-8"))
+        queue["items"][0].update({"source": "tests/example.py", "attempts": 1})
+        path.write_text(json.dumps(queue), encoding="utf-8")
+        self.assertEqual(load_queue(path)["items"][0]["status"], "DONE")
 
     def test_rejects_non_string_transition_note(self):
         with self.assertRaisesRegex(EvolutionError, "note must be a string"):

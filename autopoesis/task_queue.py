@@ -260,11 +260,35 @@ def load_queue(path: Path) -> dict[str, Any]:
     # contradict that state. Histories may omit transitions for legacy items,
     # but when a transition exists, the final recorded destination must match
     # the persisted item status.
+    # Every recorded edge must also be one advance_task could have made, so a
+    # restored history cannot carry a completion that skipped the PASS gate.
+    sources = {item["id"]: item.get("source") for item in queue["items"]}
     latest_status: dict[str, str] = {}
+    replayed_attempts: dict[str, int] = {}
+    latest_verification: dict[str, str | None] = {}
     for event in queue["history"]:
+        task_id = event.get("task_id")
+        if event.get("event") == "VERIFICATION_RECORDED":
+            bound = (
+                event.get("source") is not None
+                and event.get("source") == sources.get(task_id)
+                and event.get("attempt") == replayed_attempts.get(task_id)
+            )
+            latest_verification[task_id] = event["verification_status"] if bound else None
+            continue
         if event.get("event") != "STATUS_CHANGED":
             continue
-        task_id = event["task_id"]
+        if event["to"] not in ALLOWED_TRANSITIONS.get(event["from"], frozenset()):
+            raise EvolutionError(
+                f"Queue history has an illegal transition for task {task_id!r}: {event['from']!r} -> {event['to']!r}"
+            )
+        if event["to"] == "IN_PROGRESS":
+            replayed_attempts[task_id] = replayed_attempts.get(task_id, 0) + 1
+            latest_verification[task_id] = None
+        if event["to"] == "DONE" and latest_verification.get(task_id) != "PASS":
+            raise EvolutionError(
+                f"Queue history completes task {task_id!r} without a PASS for its source in that attempt"
+            )
         previous_destination = latest_status.get(task_id)
         if previous_destination is not None and event["from"] != previous_destination:
             raise EvolutionError(
@@ -515,14 +539,16 @@ def select_next_task(queue: dict[str, Any]) -> dict[str, Any]:
             deferred.append({"id": item["id"], "reason": "attempt limit reached"})
         elif not all(isinstance(item.get(key), str) and item[key].strip() for key in ("source", "evidence")):
             deferred.append({"id": item["id"], "reason": "insufficient evidence: needs source and evidence"})
+        elif type(item.get("priority", 0)) is not int:
+            # A malformed priority is not ranked as some other number; the item waits until it is fixed.
+            deferred.append({"id": item["id"], "reason": f"malformed priority {item['priority']!r}: needs an integer"})
         else:
             eligible.append(item)
     if not eligible:
         return {"selected": None, "reason": "no eligible OPEN candidates", "deferred": deferred}
 
     def rank(item: dict[str, Any]) -> tuple[int, int, str]:
-        priority = item.get("priority", 0)
-        return (-(priority if type(priority) is int else 0), item.get("attempts", 0), item["id"])
+        return (-item.get("priority", 0), item.get("attempts", 0), item["id"])
 
     chosen = min(eligible, key=rank)
     for item in eligible:
@@ -590,6 +616,8 @@ def record_verification_file(
         raise EvolutionError("Verification source must be a non-empty string")
     if revision is not None and not _is_digest(revision):
         raise EvolutionError("Verification revision must be a lowercase SHA-256 hex digest")
+    if attempt is not None and (type(attempt) is not int or attempt < 1):
+        raise EvolutionError("Verification attempt must be a positive integer")
 
     current = _clock(now)
     with queue_write_lock(path):
