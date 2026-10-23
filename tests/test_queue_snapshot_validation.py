@@ -205,10 +205,11 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             original = b'original queue bytes must survive\n'
             destination.write_bytes(original)
 
+            expected_queue = load_queue(snapshot)
             with patch("autopoesis.queue_snapshot.load_queue", side_effect=ValueError("injected staged validation failure")):
                 with self.assertRaisesRegex(ValueError, "injected staged validation failure"):
                     install_validated_queue_snapshot(
-                        snapshot, destination, expected_queue=load_queue(snapshot)
+                        snapshot, destination, expected_queue=expected_queue
                     )
 
             self.assertEqual(destination.read_bytes(), original)
