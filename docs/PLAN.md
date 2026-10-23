@@ -73,12 +73,17 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 - **Remaining:** owner merge; then the scheduled loop reads the protocol from `main`.
 
 ### Backlog (not READY until acceptance criteria are written)
-- A10 bounded orchestration: one scheduled run that recovers, selects, executes, verifies and records, with budgets and a disable switch. **Depends on:** #33, #34, #36. Proposed acceptance criteria (Claude, for GPT and the owner to confirm or edit):
-  1. One run performs, in order: recover expired leases, select one task, execute it under its lease, verify, then DONE or back to OPEN; each step is a history event.
-  2. A disable switch read at the start of the run stops it before any queue write, and the run says so in its output.
-  3. Budgets: at most one task and a fixed wall-clock limit per run; exceeding the limit releases the task back to OPEN with a reason.
-  4. A run with nothing eligible leaves the queue file byte-identical and reports "no work".
-  5. Two overlapping runs never both act on a task (lease plus queue lock); a test starts two runs at once.
-  6. The run's result is persisted in the CI artifact and survives the restore path, as the seed/restore probes do now.
-  7. No network, credentials or LLM calls inside the core; the run invokes only the bounded task types in `run_tasks.py`.
+- A10 bounded orchestration: one scheduled run recovers, selects, executes, verifies and records one task, with budgets and a disable switch. **Depends on:** #33, #34, #36. These are proposed acceptance criteria, added by GPT for owner confirmation; A10 is not READY until the dependencies are integrated and the exact criteria are approved:
+  1. The real runner performs one bounded cycle in order: recover expired leases → select one eligible task → transition it to IN_PROGRESS → execute only an explicitly supported handler → verify → persist PASS and DONE, or record failure and return the task to OPEN/REJECTED according to the retry policy. State changes and outcomes are recoverable from persisted history.
+  2. The disable switch is checked before any queue mutation. A disabled run exits cleanly, reports the reason, and leaves the queue byte-identical.
+  3. Budgets are enforced: at most one task per run and a fixed wall-clock limit. Timeout/interruption must not leave an unowned active task; recovery or release is idempotent and records why.
+  4. Empty/no-eligible queue reports `no work`, exits successfully, and leaves the queue byte-identical.
+  5. Executor/handler exceptions are persisted as failures, do not falsely record PASS/DONE, and do not prevent clean shutdown. Retry count and terminal rejection obey `MAX_ATTEMPTS`.
+  6. Lease/token/attempt binding is preserved end-to-end. An expired or stale worker cannot verify, renew, or complete a task after recovery and reassignment; a duplicate/replayed run cannot apply a second completion.
+  7. Two overlapping runs cannot both execute a task. A concurrency test starts two actual runner processes and proves only one obtains the lease and executes.
+  8. CI exercises the actual runner cycle (not only a synthetic seed probe): full cycle, empty queue, handler failure, expired lease recovery, stale worker, duplicate/replay, timeout/bounded exit, and clean shutdown.
+  9. Run output and queue history are persisted as artifacts and survive the existing restore path. Artifact persistence is evidence of storage only, not proof that an unattended schedule is firing.
+  10. No network access, credentials, LLM calls, or arbitrary task-provided shell execution inside the core. Only allowlisted task handlers may execute.
+  11. Add a periodic trigger only after the runner path passes the above tests; the trigger must be disableable, bounded, non-overlapping, and must not auto-merge or write to `main`.
+  12. A fresh run must report exact source SHA, CI run ID, runtime outcome and artifact/restore evidence. Synthetic probes must be labelled synthetic and cannot be reported as production task execution.
 - A Copilot test proposal for `autopoesis/task_queue.py` (run 39523564470) still awaits GPT's content audit.
