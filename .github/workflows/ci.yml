@@ -152,7 +152,7 @@ jobs:
           mkdir -p .queue-restore
           curl --fail --silent --show-error --location \
             --header "Accept: application/vnd.github+json" \
-            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --oauth2-bearer "${GH_TOKEN}" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
             --output .queue-restore-artifact.zip
           python -m autopoesis.artifact_archive .queue-restore-artifact.zip .queue-restore "${EXPECTED_DIGEST}"
