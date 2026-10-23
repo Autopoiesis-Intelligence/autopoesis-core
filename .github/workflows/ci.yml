@@ -131,6 +131,8 @@ jobs:
               json.dumps(provenance, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"artifact_id={provenance['source_artifact_id']}\n")
           print(
               f"Verified source run {provenance['source_run_id']} "
               f"at SHA {provenance['source_head_sha']}; "
@@ -142,7 +144,7 @@ jobs:
         if: ${{ inputs.restore_run_id != '' }}
         uses: actions/download-artifact@v4
         with:
-          name: autopoesis-core-results
+          artifact-ids: ${{ steps.source.outputs.artifact_id }}
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ steps.source.outputs.run_id }}
