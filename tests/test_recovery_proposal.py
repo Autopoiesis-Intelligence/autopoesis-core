@@ -16,12 +16,12 @@ def valid_evidence():
         "runs": [{
             "id": 123, "run_number": 12, "run_attempt": 1,
             "head_branch": "main",
-            "path": ".github/workflows/autopoiesis-cycle.yml@refs/heads/main",
+            "path": ".github/workflows/ci.yml@refs/heads/main",
             "conclusion": "success", "event": "schedule",
             "head_sha": SHA, "repository": REPO,
         }],
         "artifacts": [{
-            "run_id": 123, "name": "autopoiesis-cycle-state",
+            "run_id": 123, "name": "autopoesis-core-results",
             "expired": False, "digest": ARCHIVE_DIGEST,
             "manifest": {
                 "source_run_id": 123, "source_head_sha": SHA,
