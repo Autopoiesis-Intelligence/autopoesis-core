@@ -104,10 +104,10 @@ class QueueHistoryValidationTests(unittest.TestCase):
             "history": [],
         }
         with self.assertRaisesRegex(EvolutionError, "note must be a string"):
-            advance_task(queue, "TASK-1", "SELECTED", ["not a note"])
+            advance_task(queue, "TASK-1", "SELECTED", ["not a note"], owner="unit-test")
         queue["items"][0]["attempts"] = -1
         with self.assertRaisesRegex(EvolutionError, "attempts count"):
-            advance_task(queue, "TASK-1", "SELECTED")
+            advance_task(queue, "TASK-1", "SELECTED", owner="unit-test")
 
     def test_rejects_invalid_status_transition_history(self):
         with self.assertRaisesRegex(EvolutionError, "destination status"):
@@ -229,7 +229,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "type": "proposal",
                 "description": "test",
             }])
-            advance_task_file(path, "TASK-1", "SELECTED", "test transition")
+            advance_task_file(path, "TASK-1", "SELECTED", "test transition", owner="unit-test")
             queue = load_queue(path)
             self.assertEqual([event["event"] for event in queue["history"]], [
                 "CANDIDATE_ADDED",
@@ -244,7 +244,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
 
             with patch("autopoesis.task_queue.os.replace", side_effect=OSError("disk error")):
                 with self.assertRaisesRegex(OSError, "disk error"):
-                    advance_task_file(path, "TASK-1", "SELECTED", "must not partially persist")
+                    advance_task_file(path, "TASK-1", "SELECTED", "must not partially persist", owner="unit-test")
 
             self.assertEqual(path.read_bytes(), original_bytes)
             self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])

@@ -16,12 +16,13 @@ from autopoesis.task_queue import (
 )
 from autopoesis.core import EvolutionError
 from run_tasks import run
+from lease_helpers import step
 
 
 def _select(path_text, start, results):
     start.wait()
     try:
-        results.put(("selected", select_next_task_file(Path(path_text))["selected"]))
+        results.put(("selected", select_next_task_file(Path(path_text), "selector")["selected"]))
     except EvolutionError as exc:
         results.put(("rejected", str(exc)))
 
@@ -52,9 +53,7 @@ class TaskSelectionTests(unittest.TestCase):
     def test_priority_then_fewest_attempts_then_id(self):
         queue = queue_of(candidate("A"), candidate("B", priority=2), candidate("C", priority=2))
         self.assertEqual(select_next_task(queue)["selected"], "B")
-        queue = advance_task(queue, "B", "SELECTED")["queue"]
-        queue = advance_task(queue, "B", "IN_PROGRESS")["queue"]
-        queue = advance_task(queue, "B", "OPEN")["queue"]
+        queue = step(queue, "B", "SELECTED", "IN_PROGRESS", "OPEN")
         self.assertEqual(select_next_task(queue)["selected"], "C")
 
     def test_non_integer_priority_counts_as_zero(self):
@@ -65,7 +64,7 @@ class TaskSelectionTests(unittest.TestCase):
         queue = queue_of({"id": "NOEVIDENCE", "type": "proposal", "source": "x.py"}, candidate("TIRED"))
         for _ in range(MAX_ATTEMPTS):
             for status in ("SELECTED", "IN_PROGRESS", "OPEN"):
-                queue = advance_task(queue, "TIRED", status)["queue"]
+                queue = step(queue, "TIRED", status)
         result = select_next_task(queue)
         self.assertIsNone(result["selected"])
         self.assertEqual(result["deferred"], [
@@ -74,25 +73,25 @@ class TaskSelectionTests(unittest.TestCase):
         ])
 
     def test_active_work_blocks_a_second_selection(self):
-        queue = advance_task(queue_of(candidate("A"), candidate("B")), "B", "SELECTED")["queue"]
+        queue = step(queue_of(candidate("A"), candidate("B")), "B", "SELECTED")
         result = select_next_task(queue)
         self.assertIsNone(result["selected"])
         self.assertEqual(result["reason"], "work already active: B")
 
     def test_terminal_items_are_not_candidates(self):
-        queue = advance_task(queue_of(candidate("A")), "A", "REJECTED")["queue"]
+        queue = step(queue_of(candidate("A")), "A", "REJECTED")
         self.assertIsNone(select_next_task(queue)["selected"])
 
     def test_file_selection_persists_once_and_no_work_leaves_file_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "TASK_QUEUE.json"
             update_queue_file(path, [candidate("A"), candidate("B")])
-            self.assertEqual(select_next_task_file(path)["selected"], "A")
+            self.assertEqual(select_next_task_file(path, "selector")["selected"], "A")
             queue = load_queue(path)
             self.assertEqual({i["id"]: i["status"] for i in queue["items"]}, {"A": "SELECTED", "B": "OPEN"})
-            self.assertTrue(queue["history"][-1]["note"].startswith("selected: "))
+            self.assertTrue(queue["history"][-1]["note"].startswith("selected by selector: "))
             before = path.read_bytes()
-            self.assertIsNone(select_next_task_file(path)["selected"])
+            self.assertIsNone(select_next_task_file(path, "selector")["selected"])
             self.assertEqual(path.read_bytes(), before)
 
     def test_runner_task_reports_selection_without_manufacturing_progress(self):

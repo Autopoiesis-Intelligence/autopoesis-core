@@ -13,6 +13,7 @@ from autopoesis.core import EvolutionError, digest_state, evolve
 from autopoesis.task_queue import (
     advance_task_file,
     record_verification_file,
+    recover_expired_leases_file,
     select_next_task_file,
     update_queue_file,
 )
@@ -142,9 +143,16 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         note = task.get("note", "")
         if not isinstance(target_id, str) or not isinstance(status, str) or not isinstance(note, str):
             raise ValueError("update_task_status requires string task_id, status, and optional note")
-        result = advance_task_file(queue_path, target_id, status, note)
+        result = advance_task_file(
+            queue_path, target_id, status, note, owner=task.get("owner", f"run_tasks:{task_id}"), token=task.get("lease_token")
+        )
     elif task_type == "select_next_task":
-        result = select_next_task_file(queue_path)
+        owner = task.get("owner", f"run_tasks:{task_id}")
+        if not isinstance(owner, str) or not owner.strip():
+            raise ValueError("select_next_task owner must be a non-empty string")
+        result = select_next_task_file(queue_path, owner)
+    elif task_type == "recover_expired_leases":
+        result = recover_expired_leases_file(queue_path)
     elif task_type == "prepare_test_patch":
         result = prepare_patch_artifact(task, ROOT)
     elif task_type == "verify_test_patch_sandbox":
@@ -172,6 +180,7 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
             "GENERATED_TEST_EXECUTION",
             result.get("artifact_sha256"),
             task.get("source"),
+            task.get("lease_token"),
         )
 
     task_status = "FAIL" if result.get("verification_status") == "FAIL" else "PASS"

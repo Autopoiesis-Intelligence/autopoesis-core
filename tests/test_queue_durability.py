@@ -59,7 +59,7 @@ class QueueDurabilityTests(unittest.TestCase):
             with self.subTest(target=target):
                 with patch(target, side_effect=OSError("disk full")):
                     with self.assertRaisesRegex(OSError, "disk full"):
-                        advance_task_file(self.path, "TASK-1", "SELECTED", "must not persist")
+                        advance_task_file(self.path, "TASK-1", "SELECTED", "must not persist", owner="unit-test")
                 self.assertEqual(self.path.read_bytes(), original)
                 self.assertEqual(list(self.path.parent.glob(f".{self.path.name}.*.tmp")), [])
 
@@ -107,9 +107,9 @@ class QueueDurabilityTests(unittest.TestCase):
         original = self._seed()
         with queue_write_lock(self.path):
             with self.assertRaisesRegex(EvolutionError, "locked by another writer"):
-                advance_task_file(self.path, "TASK-1", "SELECTED", "concurrent")
+                advance_task_file(self.path, "TASK-1", "SELECTED", "concurrent", owner="unit-test")
         self.assertEqual(self.path.read_bytes(), original)
-        advance_task_file(self.path, "TASK-1", "SELECTED", "after release")
+        advance_task_file(self.path, "TASK-1", "SELECTED", "after release", owner="unit-test")
         self.assertEqual(load_queue(self.path)["items"][0]["status"], "SELECTED")
 
 

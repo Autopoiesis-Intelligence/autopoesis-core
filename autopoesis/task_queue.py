@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import stat
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ from .core import EvolutionError, canonical_json
 
 QUEUE_VERSION = 1
 QUEUE_STATUSES = {"OPEN", "SELECTED", "IN_PROGRESS", "DONE", "REJECTED"}
-QUEUE_HISTORY_EVENTS = {"CANDIDATE_ADDED", "STATUS_CHANGED", "VERIFICATION_RECORDED"}
+QUEUE_HISTORY_EVENTS = {"CANDIDATE_ADDED", "STATUS_CHANGED", "VERIFICATION_RECORDED", "LEASE_EXPIRED"}
 # Governed lifecycle. DONE and REJECTED are terminal. IN_PROGRESS -> OPEN is
 # the retry/interruption path; each entry into IN_PROGRESS counts an attempt.
 ALLOWED_TRANSITIONS = {
@@ -33,6 +34,60 @@ ALLOWED_TRANSITIONS = {
     "REJECTED": frozenset(),
 }
 MAX_ATTEMPTS = 3
+# An item in an active status is owned through a lease. Only the holder of the
+# current, unexpired token may change it; an expired lease can only be recovered.
+ACTIVE_STATUSES = frozenset({"SELECTED", "IN_PROGRESS"})
+LEASE_TTL = timedelta(minutes=30)
+
+
+def _is_token(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 32 and all(char in "0123456789abcdef" for char in value)
+
+
+def _aware(value: str, label: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError) as exc:
+        raise EvolutionError(f"{label} must be an ISO 8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise EvolutionError(f"{label} must include a timezone offset")
+    return parsed
+
+
+def _clock(now: datetime | None) -> datetime:
+    if now is None:
+        return datetime.now(timezone.utc)
+    if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+        raise EvolutionError("now must be a timezone-aware datetime")
+    return now
+
+
+def _validate_lease(item: dict[str, Any]) -> None:
+    lease = item.get("lease")
+    if lease is None:
+        return
+    task_id = item["id"]
+    if item.get("status") not in ACTIVE_STATUSES:
+        raise EvolutionError(f"Queued task {task_id!r} has a lease but is not active")
+    if not isinstance(lease, dict) or set(lease) != {"owner", "token", "expires_at"}:
+        raise EvolutionError(f"Invalid lease for queued task {task_id!r}")
+    if not isinstance(lease["owner"], str) or not lease["owner"].strip():
+        raise EvolutionError(f"Invalid lease owner for queued task {task_id!r}")
+    if not _is_token(lease["token"]):
+        raise EvolutionError(f"Invalid lease token for queued task {task_id!r}")
+    _aware(lease["expires_at"], f"Lease expiry for queued task {task_id!r}")
+
+
+def _lease_problem(item: dict[str, Any], token: Any, now: datetime) -> str | None:
+    """Why `token` may not act on this active item now, or None when it may."""
+    lease = item.get("lease")
+    if lease is None:
+        return "has no lease; recover it before further work"
+    if token != lease["token"]:
+        return "STALE_LEASE: token does not match the current lease"
+    if _aware(lease["expires_at"], "Lease expiry") <= now:
+        return f"STALE_LEASE: lease expired at {lease['expires_at']}"
+    return None
 
 
 def _write_queue_atomically(path: Path, queue: dict[str, Any]) -> None:
@@ -141,6 +196,15 @@ def _validate_history(history: list[Any]) -> None:
                 raise EvolutionError(f"{prefix}: artifact_sha256 must be a lowercase SHA-256 hex digest")
             if "source" in event and (not isinstance(event["source"], str) or not event["source"].strip()):
                 raise EvolutionError(f"{prefix}: source must be a non-empty string")
+            if "lease_token" in event and not _is_token(event["lease_token"]):
+                raise EvolutionError(f"{prefix}: lease_token must be a 32-character lowercase hex token")
+        if event_type == "LEASE_EXPIRED":
+            if not isinstance(event.get("owner"), str) or not event["owner"].strip():
+                raise EvolutionError(f"{prefix}: owner must be a non-empty string")
+            if event.get("token") is not None and not _is_token(event.get("token")):
+                raise EvolutionError(f"{prefix}: token must be a 32-character lowercase hex token")
+            if event.get("expires_at") is not None:
+                _aware(event["expires_at"], f"{prefix}: expires_at")
 
 
 def load_queue(path: Path) -> dict[str, Any]:
@@ -181,6 +245,7 @@ def load_queue(path: Path) -> dict[str, Any]:
         attempts = item.get("attempts", 0)
         if type(attempts) is not int or attempts < 0:
             raise EvolutionError(f"Invalid attempts count for queued task {item['id']}")
+        _validate_lease(item)
     _validate_history(queue["history"])
 
     # The queue snapshot is the current state; its own audit trail must not
@@ -288,9 +353,10 @@ def _apply_transition(queue: dict[str, Any], task_id: str, status: str, note: st
 
 
 def _has_passing_verification(queue: dict[str, Any], item: dict[str, Any]) -> bool:
-    """True when the latest verification of this item's own source since its last IN_PROGRESS is PASS."""
+    """True when the latest verification since the last IN_PROGRESS is a PASS for this source and lease."""
     source = item.get("source")
-    if not isinstance(source, str) or not source.strip():
+    token = (item.get("lease") or {}).get("token")
+    if not isinstance(source, str) or not source.strip() or token is None:
         return False
     latest = None
     for event in queue.get("history", []):
@@ -299,14 +365,31 @@ def _has_passing_verification(queue: dict[str, Any], item: dict[str, Any]) -> bo
         if event.get("event") == "STATUS_CHANGED" and event.get("to") == "IN_PROGRESS":
             latest = None
         elif event.get("event") == "VERIFICATION_RECORDED":
-            latest = event.get("verification_status") if event.get("source") == source else None
+            bound = event.get("source") == source and event.get("lease_token") == token
+            latest = event.get("verification_status") if bound else None
     return latest == "PASS"
 
 
-def advance_task(queue: dict[str, Any], task_id: str, status: str, note: str = "") -> dict[str, Any]:
-    """Apply one governed lifecycle transition; repeating the current status is a no-op."""
+def advance_task(
+    queue: dict[str, Any],
+    task_id: str,
+    status: str,
+    note: str = "",
+    *,
+    owner: str | None = None,
+    token: str | None = None,
+    now: datetime | None = None,
+    ttl: timedelta = LEASE_TTL,
+) -> dict[str, Any]:
+    """Apply one governed lifecycle transition.
+
+    Entering SELECTED grants a lease to `owner`; every later change of an
+    active item needs that lease's unexpired `token`. Repeating the current
+    status is a no-op, but on an active item it still needs a valid token.
+    """
     if not isinstance(status, str) or status not in QUEUE_STATUSES:
         raise EvolutionError(f"Unsupported queue status: {status!r}")
+    current = _clock(now)
     matches = [item for item in queue.get("items", []) if item.get("id") == task_id]
     if len(matches) != 1:
         raise EvolutionError(f"Expected exactly one queued task with id {task_id!r}")
@@ -315,17 +398,86 @@ def advance_task(queue: dict[str, Any], task_id: str, status: str, note: str = "
     attempts = item.get("attempts", 0)
     if type(attempts) is not int or attempts < 0:
         raise EvolutionError(f"Invalid attempts count for queued task {task_id!r}")
+    if previous in ACTIVE_STATUSES:
+        problem = _lease_problem(item, token, current)
+        if problem:
+            raise EvolutionError(f"Task {task_id!r} {problem}")
     if previous == status:
-        return {"queue": json.loads(canonical_json(queue)), "changed": False}
+        return {"queue": json.loads(canonical_json(queue)), "changed": False, "lease": item.get("lease")}
     if status not in ALLOWED_TRANSITIONS.get(previous, frozenset()):
         raise EvolutionError(f"Illegal transition for task {task_id!r}: {previous!r} -> {status!r}")
     if status == "IN_PROGRESS" and attempts >= MAX_ATTEMPTS:
         raise EvolutionError(f"Task {task_id!r} reached the attempt limit of {MAX_ATTEMPTS}; reject it instead")
     if status == "DONE" and not _has_passing_verification(queue, item):
         raise EvolutionError(
-            f"Task {task_id!r} has no PASS verification of its own source since its latest IN_PROGRESS"
+            f"Task {task_id!r} has no PASS verification of its own source under its current lease "
+            "since its latest IN_PROGRESS"
         )
-    return {"queue": _apply_transition(queue, task_id, status, note), "changed": True}
+    lease = item.get("lease")
+    if status == "SELECTED":
+        if not isinstance(owner, str) or not owner.strip():
+            raise EvolutionError("Selecting a task needs a non-empty lease owner")
+        if not isinstance(ttl, timedelta) or ttl <= timedelta(0):
+            raise EvolutionError("Lease ttl must be a positive timedelta")
+        active = [other["id"] for other in queue.get("items", []) if other.get("status") in ACTIVE_STATUSES]
+        if active:
+            raise EvolutionError(f"Cannot select {task_id!r}: work already active: {', '.join(active)}")
+        lease = {"owner": owner, "token": secrets.token_hex(16), "expires_at": (current + ttl).isoformat()}
+    updated = _apply_transition(queue, task_id, status, note)
+    target = next(entry for entry in updated["items"] if entry["id"] == task_id)
+    if status in ACTIVE_STATUSES:
+        target["lease"] = lease
+    else:
+        target.pop("lease", None)
+        lease = None
+    return {"queue": updated, "changed": True, "lease": lease}
+
+
+def renew_lease(
+    queue: dict[str, Any], task_id: str, token: str, *, now: datetime | None = None, ttl: timedelta = LEASE_TTL
+) -> dict[str, Any]:
+    """Extend the current holder's unexpired lease; a stale or expired token is refused."""
+    current = _clock(now)
+    if not isinstance(ttl, timedelta) or ttl <= timedelta(0):
+        raise EvolutionError("Lease ttl must be a positive timedelta")
+    updated = json.loads(canonical_json(queue))
+    item = next((entry for entry in updated.get("items", []) if entry.get("id") == task_id), None)
+    if item is None or item.get("status") not in ACTIVE_STATUSES:
+        raise EvolutionError(f"Task {task_id!r} is not active")
+    problem = _lease_problem(item, token, current)
+    if problem:
+        raise EvolutionError(f"Task {task_id!r} {problem}")
+    item["lease"]["expires_at"] = (current + ttl).isoformat()
+    return {"queue": updated, "lease": item["lease"]}
+
+
+def recover_expired_leases(queue: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+    """Return active items whose lease expired (or that have none) to OPEN, recording why."""
+    current = _clock(now)
+    updated = json.loads(canonical_json(queue))
+    recovered: list[str] = []
+    for item in sorted(updated.get("items", []), key=lambda entry: entry["id"]):
+        if item.get("status") not in ACTIVE_STATUSES:
+            continue
+        lease = item.get("lease")
+        if lease is not None and _aware(lease["expires_at"], "Lease expiry") > current:
+            continue
+        owner = lease["owner"] if lease else "unknown"
+        reason = f"lease expired at {lease['expires_at']}" if lease else "no lease"
+        updated = _apply_transition(updated, item["id"], "OPEN", f"recovered: {reason}; owner {owner}")
+        target = next(entry for entry in updated["items"] if entry["id"] == item["id"])
+        target.pop("lease", None)
+        updated["history"].append({
+            "event": "LEASE_EXPIRED",
+            "task_id": item["id"],
+            "owner": owner,
+            "token": lease["token"] if lease else None,
+            "expires_at": lease["expires_at"] if lease else None,
+            # History time is wall-clock, like every other event, so ordering stays monotonic.
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
+        recovered.append(item["id"])
+    return {"queue": updated, "recovered": recovered}
 
 
 def select_next_task(queue: dict[str, Any]) -> dict[str, Any]:
@@ -363,15 +515,22 @@ def select_next_task(queue: dict[str, Any]) -> dict[str, Any]:
     return {"selected": chosen["id"], "reason": reason, "deferred": sorted(deferred, key=lambda d: d["id"])}
 
 
-def select_next_task_file(path: Path) -> dict[str, Any]:
-    """Select the next task and persist OPEN -> SELECTED; no eligible work leaves the file untouched."""
+def select_next_task_file(
+    path: Path, owner: str, *, now: datetime | None = None, ttl: timedelta = LEASE_TTL
+) -> dict[str, Any]:
+    """Select the next task and lease it to `owner`; no eligible work leaves the file untouched."""
+    lease = None
     with queue_write_lock(path):
         queue = load_queue(path)
         selection = select_next_task(queue)
         if selection["selected"] is not None:
-            result = advance_task(queue, selection["selected"], "SELECTED", f"selected: {selection['reason']}")
+            result = advance_task(
+                queue, selection["selected"], "SELECTED", f"selected by {owner}: {selection['reason']}",
+                owner=owner, now=now, ttl=ttl,
+            )
+            lease = result["lease"]
             _write_queue_atomically(path, result["queue"])
-    return {**selection, "path": path.as_posix()}
+    return {**selection, "lease": lease, "path": path.as_posix()}
 
 
 def record_verification_file(
@@ -381,8 +540,14 @@ def record_verification_file(
     verification_level: str,
     artifact_sha256: str | None = None,
     source: str | None = None,
+    token: str | None = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Persist verification evidence; evidence for a queued item must name that item's source."""
+    """Persist verification evidence.
+
+    Evidence for a queued item must name that item's source and be recorded by
+    the holder of its current, unexpired lease while it is IN_PROGRESS.
+    """
     if not isinstance(task_id, str) or not task_id.strip():
         raise EvolutionError("Verification task_id must be a non-empty string")
     if not isinstance(verification_status, str) or verification_status not in {"PASS", "FAIL"}:
@@ -398,6 +563,7 @@ def record_verification_file(
     if source is not None and (not isinstance(source, str) or not source.strip()):
         raise EvolutionError("Verification source must be a non-empty string")
 
+    current = _clock(now)
     with queue_write_lock(path):
         queue = load_queue(path)
         item = next((entry for entry in queue["items"] if entry["id"] == task_id), None)
@@ -409,6 +575,11 @@ def record_verification_file(
                 raise EvolutionError(
                     f"Verification source {source!r} does not match queued task {task_id!r} source {expected!r}"
                 )
+            if item.get("status") != "IN_PROGRESS":
+                raise EvolutionError(f"Queued task {task_id!r} is not IN_PROGRESS; verification refused")
+            problem = _lease_problem(item, token, current)
+            if problem:
+                raise EvolutionError(f"Task {task_id!r} {problem}")
         event = {
             "event": "VERIFICATION_RECORDED",
             "task_id": task_id,
@@ -419,6 +590,8 @@ def record_verification_file(
         }
         if source is not None:
             event["source"] = source
+        if item is not None:
+            event["lease_token"] = token
         updated = json.loads(canonical_json(queue))
         updated["history"].append(event)
         _write_queue_atomically(path, updated)
@@ -434,10 +607,45 @@ def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str,
     return {"added": result["added"], "total": result["total"], "path": path.as_posix()}
 
 
-def advance_task_file(path: Path, task_id: str, status: str, note: str = "") -> dict[str, Any]:
+def advance_task_file(
+    path: Path,
+    task_id: str,
+    status: str,
+    note: str = "",
+    *,
+    owner: str | None = None,
+    token: str | None = None,
+    now: datetime | None = None,
+    ttl: timedelta = LEASE_TTL,
+) -> dict[str, Any]:
     """Persist a governed lifecycle transition; a no-op leaves the file untouched."""
     with queue_write_lock(path):
-        result = advance_task(load_queue(path), task_id, status, note)
+        result = advance_task(load_queue(path), task_id, status, note, owner=owner, token=token, now=now, ttl=ttl)
         if result["changed"]:
             _write_queue_atomically(path, result["queue"])
-    return {"task_id": task_id, "status": status, "changed": result["changed"], "path": path.as_posix()}
+    return {
+        "task_id": task_id,
+        "status": status,
+        "changed": result["changed"],
+        "lease": result["lease"],
+        "path": path.as_posix(),
+    }
+
+
+def renew_lease_file(
+    path: Path, task_id: str, token: str, *, now: datetime | None = None, ttl: timedelta = LEASE_TTL
+) -> dict[str, Any]:
+    """Persist a lease renewal by its current holder."""
+    with queue_write_lock(path):
+        result = renew_lease(load_queue(path), task_id, token, now=now, ttl=ttl)
+        _write_queue_atomically(path, result["queue"])
+    return {"task_id": task_id, "lease": result["lease"], "path": path.as_posix()}
+
+
+def recover_expired_leases_file(path: Path, *, now: datetime | None = None) -> dict[str, Any]:
+    """Persist recovery of expired leases; with nothing expired the file is left untouched."""
+    with queue_write_lock(path):
+        result = recover_expired_leases(load_queue(path), now=now)
+        if result["recovered"]:
+            _write_queue_atomically(path, result["queue"])
+    return {"recovered": result["recovered"], "path": path.as_posix()}

@@ -118,6 +118,10 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             }
             update_queue_file(queue_path, [candidate])
 
+            def lease_token():
+                item = load_queue(queue_path)["items"][0]
+                return (item.get("lease") or {}).get("token")
+
             def set_status(status):
                 tasks_path.write_text(json.dumps({"tasks": [{
                     "id": f"set-{status}",
@@ -125,12 +129,14 @@ class QueueSnapshotValidationTests(unittest.TestCase):
                     "task_id": candidate["id"],
                     "status": status,
                     "note": "first invocation",
+                    "lease_token": lease_token(),
                 }]}), encoding="utf-8")
                 self.assertEqual(run(tasks_path, results_path, queue_path), 0)
 
             set_status("SELECTED")
             set_status("IN_PROGRESS")
-            record_verification_file(queue_path, candidate["id"], "PASS", "UNIT_TEST_FIXTURE", source=candidate["source"])
+            record_verification_file(queue_path, candidate["id"], "PASS", "UNIT_TEST_FIXTURE", source=candidate["source"],
+                                     token=lease_token())
             set_status("DONE")
             after_first_run = load_queue(queue_path)
             prior_history = list(after_first_run["history"])
