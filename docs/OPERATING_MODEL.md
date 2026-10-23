@@ -88,10 +88,13 @@ Nothing in this stack merges automatically. No agent merges, enables auto-merge,
 | Core learns its Copilot budget from real runs | PROVEN for recording, unit unresolved | Ledger in `autopoesis/agent_budget.py`, runs 39336907440, 39337157482, 39337303723 and usage report from run 39346008076. Which reported field is the allowance unit is still unresolved |
 | Automatic merge | Forbidden, not a gap | See "No automatic merge" |
 
+## Decided boundaries
+
+- **Role of the human in the core (`OQ-009`, owner, 2026-10-23 14:55 UTC).** The human is not a mandatory selector of the core's inner research and learning loop. Internal selection of a candidate, research acceptance of a hypothesis and authority to change the system are separate operations; authority is never inferred from `ACCEPTED`, a passing test or an internal selector's choice. Autonomous research is not autonomous change of the core: core mutations stay behind a controlled-commit boundary with the owner's approval, and there is no automatic merge. The decision is recorded and linked to requirements in `docs/theory/OPEN_QUESTIONS.md` (theory thread, branch `claude/project-thread-ofxc12`); this file does not restate its reasoning. It is an architectural decision, not evidence that it is implemented. In the development loop described here, the owner's merge gate applies either way.
+
 ## Open questions for the owner
 
 - **Manus.** Keep the role above, change it, or drop Manus from the stack.
-- **Role of the human in the core.** The Gnosis theory documents reject the human as a mandatory selector of the core, while the final product spec keeps the owner's control at promotion boundaries. This is recorded as `OQ-009` in `docs/theory/OPEN_QUESTIONS.md` (branch `claude/project-thread-ofxc12`) and is not decided here. This document describes the development loop, where the owner's merge gate stands either way.
 - **Codex verdicts.** Whether a Codex bot review counts as a verdict (plan item P2), which changes the review rules in `AGENTS.md`.
 
 ## Keeping this file current
