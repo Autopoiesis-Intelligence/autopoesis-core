@@ -152,6 +152,22 @@ class TaskLeaseTests(unittest.TestCase):
         self.assertEqual(done["status"], "DONE")
         self.assertNotIn("lease", done)
 
+    def test_restored_pass_must_carry_the_token_leased_for_that_attempt(self):
+        token = self.acquire("executor-A")
+        advance_task_file(self.path, "TASK-1", "IN_PROGRESS", token=token)
+        record_verification_file(self.path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=1, revision=REVISION,
+                                 token=token)
+        advance_task_file(self.path, "TASK-1", "DONE", token=token, revision=REVISION)
+        self.assertEqual(item(self.path)["status"], "DONE")
+        queue = json.loads(self.path.read_text(encoding="utf-8"))
+        selected = next(e for e in queue["history"] if e["event"] == "STATUS_CHANGED" and e["to"] == "SELECTED")
+        self.assertNotIn(token, json.dumps(selected))
+        passed = next(e for e in queue["history"] if e["event"] == "VERIFICATION_RECORDED")
+        passed["lease_token"] = "f" * 32 if token != "f" * 32 else "e" * 32
+        self.path.write_text(json.dumps(queue), encoding="utf-8")
+        with self.assertRaisesRegex(EvolutionError, "without a PASS"):
+            load_queue(self.path)
+
     def test_pass_under_an_expired_lease_does_not_complete_the_next_attempt(self):
         token = self.acquire("executor-A")
         advance_task_file(self.path, "TASK-1", "IN_PROGRESS", token=token)

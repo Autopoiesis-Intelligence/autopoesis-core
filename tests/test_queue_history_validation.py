@@ -1,5 +1,6 @@
 """Validation tests for persisted task queue history."""
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -163,8 +164,11 @@ class QueueHistoryValidationTests(unittest.TestCase):
 
     def test_rejects_history_completion_without_a_bound_pass(self):
         def edge(start, end, second):
-            return {"event": "STATUS_CHANGED", "task_id": "TASK-1", "from": start, "to": end,
-                    "note": "", "at": f"2026-01-01T00:00:0{second}+00:00"}
+            event = {"event": "STATUS_CHANGED", "task_id": "TASK-1", "from": start, "to": end,
+                     "note": "", "at": f"2026-01-01T00:00:0{second}+00:00"}
+            if end == "SELECTED":
+                event["lease_sha256"] = hashlib.sha256(b"b" * 32).hexdigest()
+            return event
 
         def verification(status, attempt, source="tests/example.py", revision="a" * 64, lease_token="b" * 32):
             event = {"event": "VERIFICATION_RECORDED", "task_id": "TASK-1", "verification_status": status,
@@ -190,6 +194,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
             "FAIL": walk + [verification("FAIL", 1)],
             "other source": walk + [verification("PASS", 1, source="other.py")],
             "no revision": walk + [verification("PASS", 1, revision=None)],
+            "other lease": walk + [verification("PASS", 1, lease_token="c" * 32)],
             "no lease token": walk + [verification("PASS", 1, lease_token=None)],
             "earlier attempt": walk + [verification("PASS", 1), edge("IN_PROGRESS", "OPEN", 3),
                                        edge("OPEN", "SELECTED", 3), edge("SELECTED", "IN_PROGRESS", 3)],

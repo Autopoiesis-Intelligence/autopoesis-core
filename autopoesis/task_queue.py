@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -180,6 +181,8 @@ def _validate_history(history: list[Any]) -> None:
                 raise EvolutionError(f"{prefix}: invalid destination status")
             if not isinstance(event.get("note"), str):
                 raise EvolutionError(f"{prefix}: note must be a string")
+            if "lease_sha256" in event and not _is_digest(event["lease_sha256"]):
+                raise EvolutionError(f"{prefix}: lease_sha256 must be a lowercase SHA-256 hex digest")
         if event_type == "VERIFICATION_RECORDED":
             verification_status = event.get("verification_status")
             if not isinstance(verification_status, str) or verification_status not in {"PASS", "FAIL"}:
@@ -267,6 +270,7 @@ def load_queue(path: Path) -> dict[str, Any]:
     sources = {item["id"]: item.get("source") for item in queue["items"]}
     latest_status: dict[str, str] = {}
     replayed_attempts: dict[str, int] = {}
+    replayed_lease: dict[str, str | None] = {}
     latest_verification: dict[str, str | None] = {}
     for event in queue["history"]:
         task_id = event.get("task_id")
@@ -286,6 +290,7 @@ def load_queue(path: Path) -> dict[str, Any]:
                 and event.get("attempt") == replayed_attempts.get(task_id)
                 and _is_digest(event.get("revision"))
                 and _is_token(event.get("lease_token"))
+                and _lease_fingerprint(event["lease_token"]) == replayed_lease.get(task_id)
             )
             latest_verification[task_id] = event["verification_status"] if bound else None
             continue
@@ -295,6 +300,9 @@ def load_queue(path: Path) -> dict[str, Any]:
             raise EvolutionError(
                 f"Queue history has an illegal transition for task {task_id!r}: {event['from']!r} -> {event['to']!r}"
             )
+        if event["to"] == "SELECTED":
+            # Only the token granted by this SELECTED edge can bind evidence until the next one.
+            replayed_lease[task_id] = event.get("lease_sha256")
         if event["to"] == "IN_PROGRESS":
             if replayed_attempts.get(task_id, 0) >= MAX_ATTEMPTS:
                 raise EvolutionError(
@@ -406,6 +414,11 @@ def _apply_transition(queue: dict[str, Any], task_id: str, status: str, note: st
     return updated
 
 
+def _lease_fingerprint(token: str) -> str:
+    """History keeps the lease's hash, not the token, so a log reader cannot act as the holder."""
+    return hashlib.sha256(token.encode("ascii")).hexdigest()
+
+
 def _is_digest(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
 
@@ -490,6 +503,8 @@ def advance_task(
             raise EvolutionError(f"Cannot select {task_id!r}: work already active: {', '.join(active)}")
         lease = {"owner": owner, "token": secrets.token_hex(16), "expires_at": (current + ttl).isoformat()}
     updated = _apply_transition(queue, task_id, status, note)
+    if status == "SELECTED":
+        updated["history"][-1]["lease_sha256"] = _lease_fingerprint(lease["token"])
     target = next(entry for entry in updated["items"] if entry["id"] == task_id)
     if status in ACTIVE_STATUSES:
         target["lease"] = lease
