@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -121,6 +122,21 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual((result["status"], result["final"]), ("TIMED_OUT", "OPEN"))
         self.assertEqual(self.item()["status"], "OPEN")
         self.assertFalse(self.events("VERIFICATION_RECORDED"))
+
+    def test_hung_handler_is_killed_at_the_budget(self):
+        update_queue_file(self.path, [task()])
+
+        def hung(item, root):
+            time.sleep(60)
+            return passing(item, root)
+
+        started = time.monotonic()
+        result = run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": hung}, budget_seconds=1)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertEqual((result["status"], result["final"]), ("TIMED_OUT", "OPEN"))
+        self.assertFalse(self.events("VERIFICATION_RECORDED"))
+        self.assertEqual(run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing})["final"],
+                         "DONE")
 
     def test_expired_lease_is_recovered_before_selection(self):
         update_queue_file(self.path, [task()])

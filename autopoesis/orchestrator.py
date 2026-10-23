@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -59,6 +60,31 @@ def _when_unlocked(call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     raise AssertionError("unreachable")
 
 
+def _run_handler(handler: Handler, item: dict[str, Any], root: Path, results: Any) -> None:
+    try:
+        results.put(handler(item, root))
+    except Exception as exc:  # A handler failure is the task's outcome, not the runner's crash.
+        results.put({"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
+                     "detail": f"{type(exc).__name__}: {exc}"})
+
+
+def _bounded(handler: Handler, item: dict[str, Any], root: Path, seconds: float) -> dict[str, Any] | None:
+    """Run the handler in a child process and kill it at the deadline; None means it ran out of time."""
+    context = multiprocessing.get_context("fork")
+    results = context.Queue()
+    child = context.Process(target=_run_handler, args=(handler, item, root, results), daemon=True)
+    child.start()
+    child.join(max(seconds, 0))
+    if child.is_alive():
+        child.kill()
+        child.join()
+        return None
+    if results.empty():
+        return {"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
+                "detail": f"handler exited with code {child.exitcode} and no result"}
+    return results.get()
+
+
 def run_cycle(
     queue_path: Path,
     owner: str,
@@ -88,22 +114,18 @@ def run_cycle(
         attempt = current_attempt(queue_path, task_id)
         item = next(entry for entry in load_queue(queue_path)["items"] if entry["id"] == task_id)
         report["attempt"] = attempt
-        try:
-            outcome = handlers[item["type"]](item, repository_root)
-            status = outcome.get("verification_status")
-            if status not in {"PASS", "FAIL"}:
-                raise ValueError(f"handler returned verification_status {status!r}")
-        except Exception as exc:  # A handler failure is the task's outcome, not the runner's crash.
+        outcome = _bounded(handlers[item["type"]], item, repository_root, budget_seconds - (clock() - started))
+        if outcome is not None and outcome.get("verification_status") not in {"PASS", "FAIL"}:
             outcome = {"verification_status": "FAIL", "verification_level": "HANDLER_ERROR",
-                       "detail": f"{type(exc).__name__}: {exc}"}
-        report["verification"] = outcome["verification_status"]
-        report["detail"] = outcome.get("detail")
+                       "detail": f"handler returned verification_status {outcome.get('verification_status')!r}"}
 
-        if clock() - started > budget_seconds:
+        if outcome is None or clock() - started > budget_seconds:
             # Evidence that arrives after the budget is not trusted; release the task untouched by it.
             _when_unlocked(advance_task_file, queue_path, task_id, "OPEN",
                            f"time budget of {budget_seconds}s exceeded", token=token)
             return {**report, "status": "TIMED_OUT", "final": "OPEN"}
+        report["verification"] = outcome["verification_status"]
+        report["detail"] = outcome.get("detail")
 
         _when_unlocked(
             record_verification_file, queue_path, task_id, outcome["verification_status"],
