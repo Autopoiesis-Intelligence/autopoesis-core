@@ -255,6 +255,34 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(json.loads(completed.stdout)["final"], "DONE")
 
+    
+    def test_command_line_timeout_exits_nonzero_and_preserves_open_task(self):
+        update_queue_file(self.path, [task()])
+        completed = subprocess.run(
+            [sys.executable, "-m", "autopoesis.orchestrator", "--queue", str(self.path), "--owner", "ci",
+             "--root", str(self.repo), "--budget-seconds", "0.000001"],
+            cwd=ROOT, capture_output=True, text=True, timeout=120, check=False,
+        )
+        self.assertNotEqual(completed.returncode, 0, completed.stdout)
+        result = json.loads(completed.stdout)
+        self.assertEqual((result["status"], result["final"]), ("TIMED_OUT", "OPEN"))
+        queue = load_queue(self.path)
+        self.assertEqual(queue["items"][0]["status"], "OPEN")
+        self.assertFalse(any(event["event"] == "VERIFICATION_RECORDED" for event in queue["history"]))
+
+
+    def test_command_line_no_work_exits_zero(self):
+        update_queue_file(self.path, [])
+        completed = subprocess.run(
+            [sys.executable, "-m", "autopoesis.orchestrator", "--queue", str(self.path), "--owner", "ci",
+             "--root", str(self.repo)],
+            cwd=ROOT, capture_output=True, text=True, timeout=120, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["status"], "NO_WORK")
+        self.assertNotIn("final", result)
+
 
 if __name__ == "__main__":
     unittest.main()
