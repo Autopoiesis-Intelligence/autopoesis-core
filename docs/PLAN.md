@@ -14,7 +14,7 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 ## Integration freshness (2026-10-23)
 
 - Live `main` resolved to `4ae19f49f480246a2b42a3e9457190d43f03db6b`.
-- PRs #33, #34, #35 and #36 compare as `diverged` with `main`: each is 3 commits behind, and GitHub currently reports each as mergeable. This is not proof of a conflict; re-check the merge base and CI after upstream integration, and refresh dependent branches before relying on their old CI.
+- PRs #33, #34, #35 and #36 now contain `main` at `4ae19f49f480246a2b42a3e9457190d43f03db6b`; the chain #33 → #34 → #36 was rebuilt in order. Verification evidence is accepted only while a task is `IN_PROGRESS` (#33, carried into #34 and #36). CI evidence for each head is on its PR.
 - PR #37 is 22 commits behind `main` and is based on the older theory baseline `685c5a0ce188314bbcf49c822f9a2222b9b3a22b`; do not merge it until rebased/rebuilt against current `main`, then re-audited.
 - The available workflow-run lookup did not establish a CI run for the exact live `main` SHA. Treat `main` CI as unverified until a run tied to that SHA is confirmed.
 
@@ -22,8 +22,8 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 
 | Blocker | Unblocks | Who |
 |---|---|---|
-| Codex verdict on #33 at current HEAD `a0822ee2d706d83d00f081d4ad6148d5fbd5f8cb` | merge of #33 | GPT/Codex, then owner |
-| Codex verdict on #34 at current HEAD `6460d6c9ed4afaa4c6d1e490e8508dfae4d144e9` | merge of #34 | GPT/Codex, then owner |
+| Codex verdict on #33 at current HEAD `48c8fa52e0a0190f89ab6b641524f354cea9ee75` | merge of #33 | GPT/Codex, then owner |
+| Codex verdict on #34 at current HEAD `c581ccbb7c9657fc727fa2d053b0ac7a4cf44f5b` | merge of #34 | GPT/Codex, then owner |
 | `@codex review` requested on current heads #33–#37; no current-head verdict confirmed yet | close audit blockers | GPT/Codex; verify receipts by exact SHA |
 | Five own PRs already waiting (limit 5) | opening the P2 PR | owner merges or raises the limit |
 
@@ -32,18 +32,18 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 ### P0 — A3 closed task lifecycle — `IN_REVIEW` (PR #33)
 - **Goal:** only legal transitions; DONE only after a PASS for the item's own source since its latest IN_PROGRESS; no unchecked status writer.
 - **Evidence so far:** at `8952df5`: PR CI 39931369279, seed 39931361330, restore 39931975513. Codex findings fixed since `74c3126`: stale verifier (attempt binding), PASS bound to the tested code revision, history edges replayed against the table on load, attempt counter checked against history, attempt type.
-- **Remaining:** a Codex verdict on current HEAD `a0822ee2d706d83d00f081d4ad6148d5fbd5f8cb`; owner merge; CI on the merge commit.
+- **Remaining:** a Codex verdict on current HEAD `48c8fa52e0a0190f89ab6b641524f354cea9ee75`; owner merge; CI on the merge commit.
 
 ### P0 — A4 deterministic next-task selection — `IN_REVIEW` (PR #34)
 - **Depends on:** #33.
 - **Evidence so far:** at `480533b` (contains #33 `8952df5`): PR CI 39932079992. Codex found no major issues on `79e4692`; its P2 on `88e6671` (malformed priority) is fixed in `d9151ef`.
-- **Remaining:** a Codex verdict on current HEAD `6460d6c9ed4afaa4c6d1e490e8508dfae4d144e9`; after #33 merges, update the branch onto `main`, re-run CI, and get a verdict on the new head; owner merge.
+- **Remaining:** a Codex verdict on current HEAD `c581ccbb7c9657fc727fa2d053b0ac7a4cf44f5b`; after #33 merges, update the branch onto `main`, re-run CI, and get a verdict on the new head; owner merge.
 
 ### P1 — A9 task leases and recovery of stuck tasks — `IN_REVIEW` (PR #36, chained)
 - **Depends on:** #34 (and therefore #33). Built on the #34 branch; if #33/#34 change, A9 is rebuilt.
 - **Evidence so far:** at `4787a13` (contains #34 `480533b`): PR CI 39932167542, seed 39932159904, restore 39932194829. Codex P1s fixed: two live leases rejected on load; replayed PASS needs a revision and a lease token.
 - **Additional change:** the runner now exposes a `renew_lease` task handler so an external supervisor can renew a live lease using its current token. This is a renewal entry point, not an automatic heartbeat; unattended renewal while work runs remains unproven.
-- **Remaining:** CI on current HEAD `ebf10296c48938d745599a52f67703a72b36d6f8` (run `39994762812` success); a Codex verdict on that exact SHA; owner confirmation of the `ci.yml` probe lines; merge after #34.
+- **Remaining:** CI on current HEAD `d260ddd56c2c8b32f824231396160a54063cb7d4`; a Codex verdict on that exact SHA; owner confirmation of the `ci.yml` probe lines; merge after #34.
 - **Design and test scenarios:** `/mnt/project-files/reviews/autonomous-stack/A9_LEASE_PLAN_2026-10-23.md`, summarized here.
 - **Acceptance:**
   1. The lease owner, token and expiry are persisted, validated by `load_queue`, and survive restore.
