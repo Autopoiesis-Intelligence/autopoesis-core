@@ -131,7 +131,7 @@ class TaskLeaseTests(unittest.TestCase):
         attempts = [
             lambda: renew_lease_file(self.path, "TASK-1", old_token, now=LATER),
             lambda: record_verification_file(self.path, "TASK-1", "PASS", "unit", source=SOURCE,
-                                             token=old_token, now=LATER),
+                                             attempt=1, token=old_token, now=LATER),
             lambda: advance_task_file(self.path, "TASK-1", "DONE", token=old_token, now=LATER),
             lambda: advance_task_file(self.path, "TASK-1", "IN_PROGRESS", token=old_token, now=LATER),
         ]
@@ -144,7 +144,7 @@ class TaskLeaseTests(unittest.TestCase):
         # T8: the current holder finishes only with its own PASS.
         with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
             advance_task_file(self.path, "TASK-1", "DONE", token=new_token, now=LATER)
-        record_verification_file(self.path, "TASK-1", "PASS", "unit", source=SOURCE, token=new_token, now=LATER)
+        record_verification_file(self.path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=2, token=new_token, now=LATER)
         advance_task_file(self.path, "TASK-1", "DONE", token=new_token, now=LATER)
         done = item(self.path)
         self.assertEqual(done["status"], "DONE")
@@ -153,7 +153,7 @@ class TaskLeaseTests(unittest.TestCase):
     def test_pass_under_an_expired_lease_does_not_complete_the_next_attempt(self):
         token = self.acquire("executor-A")
         advance_task_file(self.path, "TASK-1", "IN_PROGRESS", token=token)
-        record_verification_file(self.path, "TASK-1", "PASS", "unit", source=SOURCE, token=token)
+        record_verification_file(self.path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=1, token=token)
         recover_expired_leases_file(self.path, now=LATER)
         new_token = advance_task_file(self.path, "TASK-1", "SELECTED", owner="executor-B", now=LATER)["lease"]["token"]
         advance_task_file(self.path, "TASK-1", "IN_PROGRESS", token=new_token, now=LATER)

@@ -240,6 +240,7 @@ jobs:
           from pathlib import Path
           from autopoesis.task_queue import (
               advance_task_file,
+              current_attempt,
               update_queue_file,
               record_verification_file,
           )
@@ -258,7 +259,8 @@ jobs:
           token = advance_task_file(queue_path, probe["id"], "SELECTED", note, owner="ci-seed-probe")["lease"]["token"]
           advance_task_file(queue_path, probe["id"], "IN_PROGRESS", note, token=token)
           record_verification_file(
-              queue_path, probe["id"], "PASS", "CI_SYNTHETIC_PERSISTENCE_PROBE", source=probe["source"], token=token
+              queue_path, probe["id"], "PASS", "CI_SYNTHETIC_PERSISTENCE_PROBE",
+              source=probe["source"], attempt=current_attempt(queue_path, probe["id"]), token=token,
           )
           advance_task_file(queue_path, probe["id"], "DONE", note, token=token)
           record_verification_file(

@@ -205,6 +205,8 @@ def _validate_history(history: list[Any]) -> None:
                 raise EvolutionError(f"{prefix}: token must be a 32-character lowercase hex token")
             if event.get("expires_at") is not None:
                 _aware(event["expires_at"], f"{prefix}: expires_at")
+            if "attempt" in event and (type(event["attempt"]) is not int or event["attempt"] < 1):
+                raise EvolutionError(f"{prefix}: attempt must be a positive integer")
 
 
 def load_queue(path: Path) -> dict[str, Any]:
@@ -353,7 +355,7 @@ def _apply_transition(queue: dict[str, Any], task_id: str, status: str, note: st
 
 
 def _has_passing_verification(queue: dict[str, Any], item: dict[str, Any]) -> bool:
-    """True when the latest verification since the last IN_PROGRESS is a PASS for this source and lease."""
+    """True when the latest verification since the last IN_PROGRESS is a PASS for this source, attempt and lease."""
     source = item.get("source")
     token = (item.get("lease") or {}).get("token")
     if not isinstance(source, str) or not source.strip() or token is None:
@@ -365,7 +367,11 @@ def _has_passing_verification(queue: dict[str, Any], item: dict[str, Any]) -> bo
         if event.get("event") == "STATUS_CHANGED" and event.get("to") == "IN_PROGRESS":
             latest = None
         elif event.get("event") == "VERIFICATION_RECORDED":
-            bound = event.get("source") == source and event.get("lease_token") == token
+            bound = (
+                event.get("source") == source
+                and event.get("attempt") == item.get("attempts")
+                and event.get("lease_token") == token
+            )
             latest = event.get("verification_status") if bound else None
     return latest == "PASS"
 
@@ -540,13 +546,16 @@ def record_verification_file(
     verification_level: str,
     artifact_sha256: str | None = None,
     source: str | None = None,
+    attempt: int | None = None,
     token: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Persist verification evidence.
 
-    Evidence for a queued item must name that item's source and be recorded by
-    the holder of its current, unexpired lease while it is IN_PROGRESS.
+    Evidence for a queued item must name that item's source and the attempt
+    number captured before verification started, and be recorded by the holder
+    of its current, unexpired lease. It is refused unless that exact attempt is
+    still IN_PROGRESS, so a late result cannot count for a retry.
     """
     if not isinstance(task_id, str) or not task_id.strip():
         raise EvolutionError("Verification task_id must be a non-empty string")
@@ -575,11 +584,14 @@ def record_verification_file(
                 raise EvolutionError(
                     f"Verification source {source!r} does not match queued task {task_id!r} source {expected!r}"
                 )
-            if item.get("status") != "IN_PROGRESS":
-                raise EvolutionError(f"Queued task {task_id!r} is not IN_PROGRESS; verification refused")
             problem = _lease_problem(item, token, current)
             if problem:
                 raise EvolutionError(f"Task {task_id!r} {problem}")
+            if item.get("status") != "IN_PROGRESS" or attempt != item.get("attempts"):
+                raise EvolutionError(
+                    f"Verification for attempt {attempt!r} of task {task_id!r} is stale: the task is "
+                    f"{item.get('status')} in attempt {item.get('attempts')}"
+                )
         event = {
             "event": "VERIFICATION_RECORDED",
             "task_id": task_id,
@@ -592,10 +604,23 @@ def record_verification_file(
             event["source"] = source
         if item is not None:
             event["lease_token"] = token
+            event["attempt"] = attempt
         updated = json.loads(canonical_json(queue))
         updated["history"].append(event)
         _write_queue_atomically(path, updated)
     return {"task_id": task_id, "verification_status": verification_status, "path": path.as_posix()}
+
+
+def current_attempt(path: Path, task_id: str) -> int | None:
+    """The attempt number of an IN_PROGRESS queued task, captured before starting its verification.
+
+    None when the task is absent or not IN_PROGRESS; record_verification_file then refuses the evidence.
+    """
+    queue = load_queue(path)
+    item = next((entry for entry in queue["items"] if entry["id"] == task_id), None)
+    if item is None or item.get("status") != "IN_PROGRESS":
+        return None
+    return item["attempts"]
 
 
 def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str, Any]:
