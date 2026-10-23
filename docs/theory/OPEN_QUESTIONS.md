@@ -16,7 +16,7 @@ Entry fields: `Question`, `Why it matters`, `Options`, `Who decides`, `Blocks`, 
 - Question: no primary source on autopoiesis is registered; the seed sources are reviews and second-hand summaries.
 - Why it matters: CON-001 and CLM-002 rest on summaries nobody has checked.
 - Options: register primary sources with exact bibliographic data after reading them; keep only reviews.
-- Who decides: GPT or Manus propose sources with exact references; Claude checks them against the claim.
+- Who decides: GPT proposes sources with exact references; Claude checks them against the claim.
 - Blocks: CLM-002 becoming SUPPORTED.
 - Status: UNRESOLVED
 
