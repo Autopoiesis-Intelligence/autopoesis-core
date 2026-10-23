@@ -198,6 +198,15 @@ class QueueHistoryValidationTests(unittest.TestCase):
         path = write(walk + [verification("PASS", 1), edge("IN_PROGRESS", "DONE", 4)])
         self.assertEqual(load_queue(path)["items"][0]["status"], "DONE")
 
+        # Persisted history must not change verification state after a terminal transition.
+        path = write(walk + [
+            verification("PASS", 1),
+            edge("IN_PROGRESS", "DONE", 4),
+            verification("FAIL", 1),
+        ])
+        with self.assertRaisesRegex(EvolutionError, "verification for terminal task"):
+            load_queue(path)
+
     def test_rejects_attempt_counter_that_contradicts_history(self):
         events = []
         for cycle in range(3):
