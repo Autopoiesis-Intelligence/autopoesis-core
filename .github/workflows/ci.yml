@@ -197,7 +197,7 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          import shutil
+          import os
           from pathlib import Path
           from autopoesis.queue_snapshot import validate_queue_snapshot
           from autopoesis.task_queue import load_queue
@@ -213,8 +213,16 @@ jobs:
               source_head_sha=provenance.get("source_head_sha"),
               source_repository=provenance.get("source_repository"),
           )
-          shutil.copyfile(snapshot, "TASK_QUEUE.json")
           restored = Path("TASK_QUEUE.json")
+          staged = Path("TASK_QUEUE.json.restore-tmp")
+          staged.write_bytes(snapshot.read_bytes())
+          try:
+              staged_queue = load_queue(staged)
+              if staged_queue != validation["queue"]:
+                  raise SystemExit("Staged queue does not match the validated source snapshot")
+              os.replace(staged, restored)
+          finally:
+              staged.unlink(missing_ok=True)
           restored_queue = load_queue(restored)
           if restored_queue != validation["queue"]:
               raise SystemExit("Installed queue does not match the validated source snapshot")
