@@ -67,7 +67,7 @@ jobs:
           RESTORE_RUN_ID: ${{ inputs.restore_run_id }}
         run: |
           if [[ "$RESTORE_RUN_ID" == "latest" ]]; then
-            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&status=success&branch=${GITHUB_REF_NAME}&per_page=100" > .restore-candidates.json
+            python -m autopoesis.github_pagination_cli "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&status=success&branch=${GITHUB_REF_NAME}" --collection-key workflow_runs --output .restore-candidates.json
             RESTORE_RUN_ID=$(python -c 'import json, os; from autopoesis.queue_snapshot import latest_source_run_id; print(latest_source_run_id(json.load(open(".restore-candidates.json")), current_run_id=os.environ["GITHUB_RUN_ID"], current_branch=os.environ["GITHUB_REF_NAME"]))')
             echo "Selected latest snapshot run ${RESTORE_RUN_ID} on branch ${GITHUB_REF_NAME}."
           elif [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
@@ -81,6 +81,7 @@ jobs:
           import json
           import os
           import subprocess
+          import sys
           from pathlib import Path
           from autopoesis.queue_snapshot import (
               bind_source_artifact,
@@ -110,15 +111,16 @@ jobs:
           )
           runs_response = subprocess.run(
               [
-                  "gh", "api",
-                  f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/ci.yml/runs"
-                  f"?event=workflow_dispatch&status=success&branch={os.environ['GITHUB_REF_NAME']}&per_page=100",
+                  sys.executable, "-m", "autopoesis.github_pagination_cli",
+                  f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/ci.yml/runs"
+                  f"?event=workflow_dispatch&status=success&branch={os.environ['GITHUB_REF_NAME']}",
+                  "--collection-key", "workflow_runs", "--output", ".restore-runs.json",
               ],
               check=True, capture_output=True, text=True,
           )
           provenance = require_latest_source_run(
               provenance,
-              json.loads(runs_response.stdout),
+              json.loads(Path(".restore-runs.json").read_text(encoding="utf-8")),
               current_run_id=os.environ["GITHUB_RUN_ID"],
               current_branch=os.environ["GITHUB_REF_NAME"],
           )
