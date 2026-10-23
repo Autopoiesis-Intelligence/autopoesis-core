@@ -209,7 +209,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
                                "note": "", "at": f"2026-01-01T00:00:0{cycle}+00:00"})
         path = self._write_queue(events)
         queue = json.loads(path.read_text(encoding="utf-8"))
-        for attempts in (0, 2, 4):
+        for attempts in (0, 1, 2):
             with self.subTest(attempts=attempts):
                 queue["items"][0].update({"status": "OPEN", "attempts": attempts})
                 path.write_text(json.dumps(queue), encoding="utf-8")
@@ -218,6 +218,25 @@ class QueueHistoryValidationTests(unittest.TestCase):
         queue["items"][0]["attempts"] = 3
         path.write_text(json.dumps(queue), encoding="utf-8")
         self.assertEqual(load_queue(path)["items"][0]["attempts"], 3)
+
+    def test_rejects_attempts_beyond_the_limit(self):
+        # advance_task never starts a fourth attempt, so a restored queue that claims one is forged.
+        path = self._write_queue([])
+        queue = json.loads(path.read_text(encoding="utf-8"))
+        queue["items"][0].update({"status": "OPEN", "attempts": 4})
+        path.write_text(json.dumps(queue), encoding="utf-8")
+        with self.assertRaisesRegex(EvolutionError, "attempt limit"):
+            load_queue(path)
+        events = []
+        for cycle in range(4):
+            for start, end in (("OPEN", "SELECTED"), ("SELECTED", "IN_PROGRESS"), ("IN_PROGRESS", "OPEN")):
+                events.append({"event": "STATUS_CHANGED", "task_id": "TASK-1", "from": start, "to": end,
+                               "note": "", "at": f"2026-01-01T00:00:0{cycle}+00:00"})
+        queue["history"] = events
+        queue["items"][0]["attempts"] = 3
+        path.write_text(json.dumps(queue), encoding="utf-8")
+        with self.assertRaisesRegex(EvolutionError, "beyond the attempt limit"):
+            load_queue(path)
 
     def test_rejects_non_string_transition_note(self):
         with self.assertRaisesRegex(EvolutionError, "note must be a string"):
