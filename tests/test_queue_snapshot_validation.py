@@ -3,12 +3,14 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from autopoesis.core import EvolutionError
 from autopoesis.queue_snapshot import (
     bind_source_artifact,
     create_queue_snapshot_manifest,
+    install_validated_queue_snapshot,
     latest_source_run_id,
     require_latest_source_run,
     validate_queue_snapshot,
@@ -176,6 +178,47 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         return snapshot, manifest_path, expected, manifest
 
+    def test_atomic_install_replaces_destination_only_after_staged_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot, _manifest_path, _expected, _manifest = self._write_bound_snapshot(root)
+            install_dir = root / "installed"
+            install_dir.mkdir()
+            destination = install_dir / "TASK_QUEUE.json"
+            original = b'{"version": 1, "items": [], "history": []}\n'
+            destination.write_bytes(original)
+            expected_queue = load_queue(snapshot)
+
+            result = install_validated_queue_snapshot(
+                snapshot, destination, expected_queue=expected_queue
+            )
+
+            self.assertEqual(load_queue(destination), expected_queue)
+            self.assertEqual(result["queue"], expected_queue)
+            self.assertEqual(result["size_bytes"], snapshot.stat().st_size)
+            self.assertNotEqual(destination.read_bytes(), original)
+            self.assertEqual(list(install_dir.glob(".TASK_QUEUE.json.restore-*.tmp")), [])
+
+    def test_atomic_install_preserves_existing_destination_if_staging_validation_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot, _manifest_path, _expected, _manifest = self._write_bound_snapshot(root)
+            install_dir = root / "installed"
+            install_dir.mkdir()
+            destination = install_dir / "TASK_QUEUE.json"
+            original = b'original queue bytes must survive\n'
+            destination.write_bytes(original)
+
+            expected_queue = load_queue(snapshot)
+            with patch("autopoesis.queue_snapshot.load_queue", side_effect=ValueError("injected staged validation failure")):
+                with self.assertRaisesRegex(ValueError, "injected staged validation failure"):
+                    install_validated_queue_snapshot(
+                        snapshot, destination, expected_queue=expected_queue
+                    )
+
+            self.assertEqual(destination.read_bytes(), original)
+            self.assertEqual(list(install_dir.glob(".TASK_QUEUE.json.restore-*.tmp")), [])
+
     def test_snapshot_manifest_round_trip_binds_queue_to_source(self):
         with tempfile.TemporaryDirectory() as directory:
             snapshot, manifest_path, expected, manifest = self._write_bound_snapshot(
@@ -315,7 +358,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
 
         bound = bind_source_artifact(
             source,
-            {"artifacts": [artifact]},
+            self._artifact_payload([artifact]),
             requested_run_id=12345,
         )
 
@@ -338,25 +381,50 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             "size_in_bytes": 4096,
         }
         cases = (
-            ({"artifacts": []}, "exactly one"),
-            ({"artifacts": [{**artifact, "expired": True}]}, "exactly one"),
-            ({"artifacts": [artifact, artifact]}, "exactly one"),
-            (
-                {"artifacts": [{**artifact, "workflow_run": {"id": 999, "head_sha": "a" * 40}}]},
-                "not bound",
-            ),
-            (
-                {"artifacts": [{**artifact, "workflow_run": {"id": 12345, "head_sha": "c" * 40}}]},
-                "head SHA",
-            ),
-            ({"artifacts": [{**artifact, "digest": "sha256:invalid"}]}, "valid SHA-256"),
-            ({"artifacts": [{**artifact, "size_in_bytes": "4096"}]}, "valid size"),
+            ([], "exactly one"),
+            ([{**artifact, "expired": True}], "exactly one"),
+            ([artifact, {**artifact, "id": 67891}], "exactly one"),
+            ([{**artifact, "workflow_run": {"id": 999, "head_sha": "a" * 40}}], "not bound"),
+            ([{**artifact, "workflow_run": {"id": 12345, "head_sha": "c" * 40}}], "head SHA"),
+            ([{**artifact, "digest": "sha256:invalid"}], "valid SHA-256"),
+            ([{**artifact, "size_in_bytes": "4096"}], "valid size"),
         )
 
-        for payload, message in cases:
+        for artifacts, message in cases:
+            payload = self._artifact_payload(artifacts)
             with self.subTest(payload=payload), self.assertRaisesRegex(ValueError, message):
                 bind_source_artifact(source, payload, requested_run_id=12345)
 
+    def test_source_artifact_requires_complete_pagination_evidence(self):
+        source = validate_restore_source_run(
+            self._valid_source_run(),
+            requested_run_id=12345,
+            expected_repository="Autopoiesis-Intelligence/autopoesis-core",
+        )
+        with self.assertRaisesRegex(ValueError, "lacks complete observed pagination"):
+            bind_source_artifact(
+                source, {"artifacts": []}, requested_run_id=12345
+            )
+
+    def _artifact_payload(self, artifacts):
+        page = {
+            "page": 1,
+            "per_page": 100,
+            "total_count": len(artifacts),
+            "next_page": None,
+            "request_url": "https://api.github.com/repos/example/repo/actions/runs/12345/artifacts?per_page=100&page=1",
+            "link_header": None,
+            "artifacts": artifacts,
+        }
+        return {
+            "artifacts": artifacts,
+            "total_count": len(artifacts),
+            "pagination_evidence": {
+                "complete": True,
+                "page_count": 1,
+                "pages": [page],
+            },
+        }
 
     def _dispatch_run(self, run_id, **overrides):
         run = {
@@ -368,10 +436,30 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         }
         return {**run, **overrides}
 
+    def _history_payload(self, runs):
+        page = {
+            "page": 1,
+            "per_page": 100,
+            "total_count": len(runs),
+            "next_page": None,
+            "request_url": "https://api.github.com/repos/example/repo/actions/workflows/ci.yml/runs?per_page=100&page=1",
+            "link_header": None,
+            "workflow_runs": runs,
+        }
+        return {
+            "workflow_runs": runs,
+            "total_count": len(runs),
+            "pagination_evidence": {
+                "complete": True,
+                "page_count": 1,
+                "pages": [page],
+            },
+        }
+
     def _latest_check(self, source_run_id, runs, current_run_id=500):
         return require_latest_source_run(
             {"source_run_id": source_run_id},
-            {"workflow_runs": runs},
+            self._history_payload(runs),
             current_run_id=current_run_id,
             current_branch="main",
         )
@@ -398,7 +486,6 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             self._dispatch_run(430, head_branch="other"),
             self._dispatch_run(420, path=".github/workflows/other.yml@refs/heads/main"),
             self._dispatch_run("410"),
-            "not-a-run",
             self._dispatch_run(300),
         ]
 
@@ -419,7 +506,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         ]
 
         self.assertEqual(
-            latest_source_run_id({"workflow_runs": runs}, current_run_id=500, current_branch="main"),
+            latest_source_run_id(self._history_payload(runs), current_run_id=500, current_branch="main"),
             300,
         )
 
@@ -427,11 +514,11 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         runs = [self._dispatch_run(500), self._dispatch_run(300, head_branch="other")]
 
         with self.assertRaisesRegex(ValueError, "No successful workflow_dispatch"):
-            latest_source_run_id({"workflow_runs": runs}, current_run_id=500, current_branch="main")
+            latest_source_run_id(self._history_payload(runs), current_run_id=500, current_branch="main")
 
     def test_latest_check_fails_closed_on_missing_or_malformed_run_list(self):
         cases = (
-            ("no candidate runs", {"workflow_runs": []}, "No successful workflow_dispatch"),
+            ("no candidate runs", self._history_payload([]), "No successful workflow_dispatch"),
             ("missing array", {}, "workflow_runs array"),
             ("not an object", [], "JSON object"),
         )

@@ -67,7 +67,7 @@ jobs:
           RESTORE_RUN_ID: ${{ inputs.restore_run_id }}
         run: |
           if [[ "$RESTORE_RUN_ID" == "latest" ]]; then
-            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&status=success&branch=${GITHUB_REF_NAME}&per_page=100" > .restore-candidates.json
+            python -m autopoesis.github_pagination_cli "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&status=success&branch=${GITHUB_REF_NAME}" --collection-key workflow_runs --output .restore-candidates.json
             RESTORE_RUN_ID=$(python -c 'import json, os; from autopoesis.queue_snapshot import latest_source_run_id; print(latest_source_run_id(json.load(open(".restore-candidates.json")), current_run_id=os.environ["GITHUB_RUN_ID"], current_branch=os.environ["GITHUB_REF_NAME"]))')
             echo "Selected latest snapshot run ${RESTORE_RUN_ID} on branch ${GITHUB_REF_NAME}."
           elif [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
@@ -81,6 +81,7 @@ jobs:
           import json
           import os
           import subprocess
+          import sys
           from pathlib import Path
           from autopoesis.queue_snapshot import (
               bind_source_artifact,
@@ -97,12 +98,15 @@ jobs:
           )
           artifacts_response = subprocess.run(
               [
-                  "gh", "api",
-                  f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{requested_run_id}/artifacts",
+                  sys.executable, "-m", "autopoesis.github_pagination_cli",
+                  f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{requested_run_id}/artifacts",
+                  "--collection-key", "artifacts", "--output", ".restore-artifacts.json",
               ],
               check=True, capture_output=True, text=True,
           )
-          artifacts_payload = json.loads(artifacts_response.stdout)
+          artifacts_payload = json.loads(
+              Path(".restore-artifacts.json").read_text(encoding="utf-8")
+          )
           provenance = bind_source_artifact(
               provenance,
               artifacts_payload,
@@ -110,15 +114,16 @@ jobs:
           )
           runs_response = subprocess.run(
               [
-                  "gh", "api",
-                  f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/ci.yml/runs"
-                  f"?event=workflow_dispatch&status=success&branch={os.environ['GITHUB_REF_NAME']}&per_page=100",
+                  sys.executable, "-m", "autopoesis.github_pagination_cli",
+                  f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/ci.yml/runs"
+                  f"?event=workflow_dispatch&status=success&branch={os.environ['GITHUB_REF_NAME']}",
+                  "--collection-key", "workflow_runs", "--output", ".restore-runs.json",
               ],
               check=True, capture_output=True, text=True,
           )
           provenance = require_latest_source_run(
               provenance,
-              json.loads(runs_response.stdout),
+              json.loads(Path(".restore-runs.json").read_text(encoding="utf-8")),
               current_run_id=os.environ["GITHUB_RUN_ID"],
               current_branch=os.environ["GITHUB_REF_NAME"],
           )
@@ -126,6 +131,9 @@ jobs:
               json.dumps(provenance, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"artifact_id={provenance['source_artifact_id']}\n")
+              output.write(f"artifact_digest={provenance['source_artifact_digest']}\n")
           print(
               f"Verified source run {provenance['source_run_id']} "
               f"at SHA {provenance['source_head_sha']}; "
@@ -133,15 +141,21 @@ jobs:
               f"with archive digest {provenance['source_artifact_digest']}."
           )
           PY
-      - name: Download prior queue snapshot
+      - name: Download and verify prior queue snapshot archive
         if: ${{ inputs.restore_run_id != '' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: autopoesis-core-results
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ steps.source.outputs.run_id }}
-          path: .queue-restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.source.outputs.artifact_id }}
+          EXPECTED_DIGEST: ${{ steps.source.outputs.artifact_digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p .queue-restore
+          curl --fail --silent --show-error --location \
+            --header "Accept: application/vnd.github+json" \
+            --oauth2-bearer "${GH_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            --output .queue-restore-artifact.zip
+          python -m autopoesis.artifact_archive .queue-restore-artifact.zip .queue-restore "${EXPECTED_DIGEST}"
       - name: Inject restore fault for negative verification
         if: ${{ inputs.restore_run_id != '' && inputs.restore_fault != '' && inputs.restore_fault != 'none' }}
         env:
@@ -190,10 +204,11 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          import shutil
           from pathlib import Path
-          from autopoesis.queue_snapshot import validate_queue_snapshot
-          from autopoesis.task_queue import load_queue
+          from autopoesis.queue_snapshot import (
+              install_validated_queue_snapshot,
+              validate_queue_snapshot,
+          )
 
           snapshot = Path(".queue-restore/TASK_QUEUE.json")
           manifest_path = Path(".queue-restore/QUEUE_SNAPSHOT_MANIFEST.json")
@@ -206,15 +221,15 @@ jobs:
               source_head_sha=provenance.get("source_head_sha"),
               source_repository=provenance.get("source_repository"),
           )
-          shutil.copyfile(snapshot, "TASK_QUEUE.json")
-          restored = Path("TASK_QUEUE.json")
-          restored_queue = load_queue(restored)
-          if restored_queue != validation["queue"]:
-              raise SystemExit("Installed queue does not match the validated source snapshot")
+          installed = install_validated_queue_snapshot(
+              snapshot,
+              Path("TASK_QUEUE.json"),
+              expected_queue=validation["queue"],
+          )
           provenance["source_manifest_sha256"] = validation["source_manifest_sha256"]
           provenance["source_manifest_task_queue_sha256"] = validation["task_queue_sha256"]
           provenance["restored_queue_sha256"] = validation["task_queue_sha256"]
-          provenance["restored_queue_size_bytes"] = restored.stat().st_size
+          provenance["restored_queue_size_bytes"] = installed["size_bytes"]
           provenance_path.write_text(
               json.dumps(provenance, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",

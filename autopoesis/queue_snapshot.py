@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +110,43 @@ def validate_queue_snapshot(
     }
 
 
+
+def install_validated_queue_snapshot(
+    snapshot_path: Path,
+    destination_path: Path,
+    *,
+    expected_queue: Any,
+) -> dict[str, Any]:
+    """Stage, validate, and atomically replace the destination queue file."""
+    if not snapshot_path.is_file():
+        raise ValueError("Queue snapshot file is missing")
+    destination_path = Path(destination_path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination_path.name}.restore-",
+        suffix=".tmp",
+        dir=destination_path.parent,
+    )
+    staged = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(snapshot_path.read_bytes())
+            output.flush()
+            os.fsync(output.fileno())
+        staged_queue = load_queue(staged)
+        if staged_queue != expected_queue:
+            raise ValueError("Staged queue does not match the validated source snapshot")
+        os.replace(staged, destination_path)
+        installed_queue = load_queue(destination_path)
+        if installed_queue != expected_queue:
+            raise ValueError("Installed queue does not match the validated source snapshot")
+        return {
+            "queue": installed_queue,
+            "size_bytes": destination_path.stat().st_size,
+        }
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def validate_restore_source_run(
     run: Any,
     *,
@@ -174,6 +213,21 @@ def bind_source_artifact(
     artifacts = artifacts_payload.get("artifacts")
     if not isinstance(artifacts, list):
         raise ValueError("Source artifacts response must contain an artifacts array")
+    evidence = artifacts_payload.get("pagination_evidence")
+    if not isinstance(evidence, dict) or evidence.get("complete") is not True:
+        raise ValueError("Source artifact list lacks complete observed pagination evidence")
+    pages = evidence.get("pages")
+    page_count = evidence.get("page_count")
+    if type(page_count) is not int or not isinstance(pages, list) or page_count != len(pages):
+        raise ValueError("Source artifact pagination evidence has an invalid page count")
+    from .github_pagination import validate_paginated_collection
+    captured_artifacts = validate_paginated_collection(
+        pages,
+        collection_key="artifacts",
+        expected_page_size=100,
+    )
+    if captured_artifacts != artifacts:
+        raise ValueError("Source artifacts differ from captured pagination evidence")
 
     expected_id = _run_id_text(requested_run_id)
     matches = [
@@ -210,6 +264,31 @@ def bind_source_artifact(
     }
 
 
+def _require_complete_workflow_run_history(runs_payload: Any) -> list[dict[str, Any]]:
+    """Require captured pagination evidence before history can authorize restore."""
+    if not isinstance(runs_payload, dict):
+        raise ValueError("Workflow runs response must be a JSON object")
+    runs = runs_payload.get("workflow_runs")
+    if not isinstance(runs, list):
+        raise ValueError("Workflow runs response must contain a workflow_runs array")
+    evidence = runs_payload.get("pagination_evidence")
+    if not isinstance(evidence, dict) or evidence.get("complete") is not True:
+        raise ValueError("Workflow run history lacks complete observed pagination evidence")
+    pages = evidence.get("pages")
+    page_count = evidence.get("page_count")
+    if type(page_count) is not int or not isinstance(pages, list) or page_count != len(pages):
+        raise ValueError("Workflow run pagination evidence has an invalid page count")
+    from .github_pagination import validate_paginated_collection
+    captured_records = validate_paginated_collection(
+        pages,
+        collection_key="workflow_runs",
+        expected_page_size=100,
+    )
+    if captured_records != runs:
+        raise ValueError("Workflow run records differ from captured pagination evidence")
+    return runs
+
+
 def latest_source_run_id(
     runs_payload: Any,
     *,
@@ -222,9 +301,7 @@ def latest_source_run_id(
         raise ValueError("Current branch must be a non-empty string")
     if not isinstance(runs_payload, dict):
         raise ValueError("Workflow runs response must be a JSON object")
-    runs = runs_payload.get("workflow_runs")
-    if not isinstance(runs, list):
-        raise ValueError("Workflow runs response must contain a workflow_runs array")
+    runs = _require_complete_workflow_run_history(runs_payload)
 
     current_id = int(_run_id_text(current_run_id))
     candidates = []
