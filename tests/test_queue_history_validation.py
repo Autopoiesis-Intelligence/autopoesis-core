@@ -202,10 +202,12 @@ class QueueHistoryValidationTests(unittest.TestCase):
         self.assertEqual(load_queue(path)["items"][0]["status"], "DONE")
 
         # Persisted history must not change verification state after a terminal transition.
+        post_done_failure = verification("FAIL", 1)
+        post_done_failure["at"] = "2026-01-01T00:00:05+00:00"
         path = write(walk + [
             verification("PASS", 1),
             edge("IN_PROGRESS", "DONE", 4),
-            verification("FAIL", 1),
+            post_done_failure,
         ])
         with self.assertRaisesRegex(EvolutionError, "verification for terminal task"):
             load_queue(path)
