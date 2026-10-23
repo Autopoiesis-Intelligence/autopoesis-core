@@ -1,4 +1,4 @@
-"""A10: one bounded, unattended cycle over the task queue.
+"""A10: one unattended cycle over the task queue, with a bounded handler.
 
 recover expired leases -> select one task the runner can execute -> IN_PROGRESS
 -> run its allowlisted handler -> record verification -> DONE, OPEN or REJECTED.
@@ -115,8 +115,9 @@ def run_cycle(
 
     Time bounds: `budget_seconds` bounds the handler, including building and handing over its
     result, because that all happens in a child process killed at the deadline. Each queue step
-    waits at most LOCK_RETRIES * LOCK_RETRY_SECONDS for the lock and then refuses. A cycle has
-    at most five locked queue steps, so its wall time is at most the budget plus five lock waits.
+    waits at most LOCK_RETRIES * LOCK_RETRY_SECONDS for the lock and then refuses. Not covered
+    by either bound: queue reads and writes in this process once a lock is held, and the
+    post-PASS source_tree_digest of the checkout. The whole cycle has no single wall-time limit.
     A handler that does not finish within the budget gets no verification and no DONE. The
     result size cap limits what is accepted, not the child's memory use while it builds the result.
     """
