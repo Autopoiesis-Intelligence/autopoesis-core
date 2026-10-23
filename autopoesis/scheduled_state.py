@@ -13,8 +13,9 @@ def select_prior_successful_run(
 ) -> dict[str, Any] | None:
     """Select the newest successful main-branch cycle from all API pages.
 
-    pages is the list produced by gh api --paginate --slurp. Refuse malformed
-    or incomplete-looking input instead of treating it as empty history.
+    Refuse malformed history and refuse to roll back to an older snapshot when a
+    newer cycle failed or was rerun. The latter can have changed queue state
+    before failing, so replaying an older artifact is unsafe.
     """
     if not isinstance(pages, list) or not pages:
         raise ValueError("workflow runs history is incomplete or malformed")
@@ -23,19 +24,31 @@ def select_prior_successful_run(
         raise ValueError("workflow runs page is malformed")
 
     runs = [run for page in pages for run in page["workflow_runs"]]
-    prior = [
+    relevant = [
         run for run in runs
         if isinstance(run, dict)
         and run.get("id") != current_run_id
         and run.get("head_branch") == "main"
-        and run.get("conclusion") == "success"
-        # A rerun reuses the original run ID/run_number but may replace artifacts
-        # or replay old queue state. Never use rerun attempts as persistence sources.
-        and run.get("run_attempt", 1) == 1
         and isinstance(run.get("path"), str)
         and run["path"].split("@", 1)[0] == WORKFLOW_PATH
     ]
-    prior.sort(key=lambda run: (run.get("run_number", 0), run.get("id", 0)), reverse=True)
+    relevant.sort(
+        key=lambda run: (run.get("run_number", 0), run.get("id", 0)),
+        reverse=True,
+    )
+    prior = [
+        run for run in relevant
+        if run.get("conclusion") == "success"
+        and run.get("run_attempt", 1) == 1
+    ]
+
+    if prior and relevant and relevant[0] is not prior[0]:
+        latest = relevant[0]
+        raise ValueError(
+            "Refusing to restore an older snapshot: newest cycle run "
+            f"{latest.get('id')} has conclusion={latest.get('conclusion')!r} "
+            f"and run_attempt={latest.get('run_attempt', 1)!r}"
+        )
 
     if prior and bootstrap:
         raise ValueError("Refusing bootstrap: a prior successful cycle already exists")
