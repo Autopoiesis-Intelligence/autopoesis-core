@@ -133,10 +133,12 @@ jobs:
           SOURCE_HEAD_SHA: ${{ steps.state.outputs.source_head_sha }}
         run: |
           python - <<'PY'
-          import os, shutil
+          import os
           from pathlib import Path
-          from autopoesis.queue_snapshot import validate_queue_snapshot
-          from autopoesis.task_queue import load_queue
+          from autopoesis.queue_snapshot import (
+              install_validated_queue_snapshot,
+              validate_queue_snapshot,
+          )
           snapshot = Path(".cycle-restore/TASK_QUEUE.json")
           manifest = Path(".cycle-restore/QUEUE_SNAPSHOT_MANIFEST.json")
           result = validate_queue_snapshot(
@@ -145,10 +147,16 @@ jobs:
               source_head_sha=os.environ["SOURCE_HEAD_SHA"],
               source_repository=os.environ["GITHUB_REPOSITORY"],
           )
-          shutil.copyfile(snapshot, "TASK_QUEUE.json")
-          if load_queue(Path("TASK_QUEUE.json")) != result["queue"]:
-              raise SystemExit("Installed queue differs from validated snapshot")
-          print(f"Restored validated queue SHA-256 {result['task_queue_sha256']}.")
+          installed = install_validated_queue_snapshot(
+              snapshot,
+              Path("TASK_QUEUE.json"),
+              expected_queue=result["queue"],
+          )
+          print(
+              "Restored validated queue atomically; "
+              f"SHA-256 {result['task_queue_sha256']}, "
+              f"size {installed['size_bytes']} bytes."
+          )
 
       - name: Initialize the first queue (explicit bootstrap only)
         if: ${{ steps.state.outputs.source_run_id == 'bootstrap' }}
