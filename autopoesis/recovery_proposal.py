@@ -47,6 +47,8 @@ def build_recovery_proposal(evidence: Any) -> dict[str, Any]:
     repository = evidence.get("repository")
     if not isinstance(repository, str) or not repository.strip():
         return _blocked("Evidence has no repository identity")
+    if evidence.get("history_complete") is not True:
+        return _blocked("Run history completeness is not proven; refusing to select a possibly stale snapshot")
     runs = evidence.get("runs")
     artifacts = evidence.get("artifacts")
     if not isinstance(runs, list) or not isinstance(artifacts, list):
