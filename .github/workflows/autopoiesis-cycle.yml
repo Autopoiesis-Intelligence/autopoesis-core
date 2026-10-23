@@ -29,7 +29,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Select and validate previous state, or explicitly bootstrap once
+
+      - name: Select previous successful state or explicit bootstrap
         id: state
         env:
           GH_TOKEN: ${{ github.token }}
@@ -54,20 +55,64 @@ jobs:
               raise SystemExit("Refusing bootstrap: a prior successful cycle already exists")
           if not prior and not bootstrap:
               raise SystemExit("No successful prior snapshot; dispatch once with bootstrap=true")
-          if prior:
-              run = prior[0]
-              if not isinstance(run.get("head_sha"), str) or len(run["head_sha"]) != 40:
-                  raise SystemExit("Refusing: source run has no valid head SHA")
-              Path(".cycle-source.json").write_text(json.dumps(run))
-              print(f"source_run_id={run['id']}")
-              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              if prior:
+                  run = prior[0]
+                  if not isinstance(run.get("head_sha"), str) or len(run["head_sha"]) != 40:
+                      raise SystemExit("Refusing: source run has no valid head SHA")
                   f.write(f"source_run_id={run['id']}\n")
-          else:
-              print("Explicit one-time bootstrap accepted; no prior successful cycle exists.")
-              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"source_head_sha={run['head_sha']}\n")
+                  print(f"Selected prior run {run['id']} at {run['head_sha']}.")
+              else:
                   f.write("source_run_id=bootstrap\n")
+                  print("Explicit one-time bootstrap accepted; no prior successful cycle exists.")
           PY
-     - name: Download previous queue snapshot
+
+      - name: Verify source run and artifact
+        if: ${{ steps.state.outputs.source_run_id != 'bootstrap' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ steps.state.outputs.source_run_id }}
+          SOURCE_HEAD_SHA: ${{ steps.state.outputs.source_head_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" > .cycle-source.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" > .cycle-artifacts.json
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          run = json.loads(Path(".cycle-source.json").read_text())
+          payload = json.loads(Path(".cycle-artifacts.json").read_text())
+          repo = run.get("repository")
+          if run.get("id") != int(os.environ["SOURCE_RUN_ID"]):
+              raise SystemExit("Refusing: source run ID mismatch")
+          if run.get("conclusion") != "success" or run.get("head_branch") != "main":
+              raise SystemExit("Refusing: source run is not successful on main")
+          if run.get("path", "").split("@", 1)[0] != ".github/workflows/autopoiesis-cycle.yml":
+              raise SystemExit("Refusing: source run belongs to another workflow")
+          if run.get("event") not in {"schedule", "workflow_dispatch"}:
+              raise SystemExit("Refusing: unexpected source event")
+          if not isinstance(repo, dict) or repo.get("full_name") != os.environ["GITHUB_REPOSITORY"]:
+              raise SystemExit("Refusing: source repository mismatch")
+          sha = run.get("head_sha")
+          if sha != os.environ["SOURCE_HEAD_SHA"] or not re.fullmatch(r"[0-9a-f]{40}", str(sha)):
+              raise SystemExit("Refusing: source SHA mismatch or invalid SHA")
+          artifacts = payload.get("artifacts")
+          if not isinstance(artifacts, list):
+              raise SystemExit("Refusing: malformed artifact list")
+          matches = [a for a in artifacts if isinstance(a, dict) and a.get("name") == "autopoiesis-cycle-state" and not a.get("expired", True)]
+          if len(matches) != 1:
+              raise SystemExit("Refusing: source must have exactly one unexpired state artifact")
+          artifact = matches[0]
+          binding = artifact.get("workflow_run")
+          if not isinstance(binding, dict) or str(binding.get("id")) != str(run["id"]) or binding.get("head_sha") != sha:
+              raise SystemExit("Refusing: artifact is not bound to the source run and SHA")
+          if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(artifact.get("digest", ""))):
+              raise SystemExit("Refusing: artifact archive digest missing or invalid")
+          print(f"Verified source run {run['id']}, SHA {sha}, artifact {artifact.get('id')}, digest {artifact['digest']}.")
+          PY
+
+      - name: Download previous queue snapshot
         if: ${{ steps.state.outputs.source_run_id != 'bootstrap' }}
         uses: actions/download-artifact@v4
         with:
@@ -76,6 +121,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ steps.state.outputs.source_run_id }}
           path: .cycle-restore
+
       - name: Validate and install previous queue snapshot
         if: ${{ steps.state.outputs.source_run_id != 'bootstrap' }}
         env:
@@ -83,9 +129,10 @@ jobs:
           SOURCE_HEAD_SHA: ${{ steps.state.outputs.source_head_sha }}
         run: |
           python - <<'PY'
-          import json, os, shutil
+          import os, shutil
           from pathlib import Path
           from autopoesis.queue_snapshot import validate_queue_snapshot
+          from autopoesis.task_queue import load_queue
           snapshot = Path(".cycle-restore/TASK_QUEUE.json")
           manifest = Path(".cycle-restore/QUEUE_SNAPSHOT_MANIFEST.json")
           result = validate_queue_snapshot(
@@ -95,11 +142,10 @@ jobs:
               source_repository=os.environ["GITHUB_REPOSITORY"],
           )
           shutil.copyfile(snapshot, "TASK_QUEUE.json")
-          from autopoesis.task_queue import load_queue
           if load_queue(Path("TASK_QUEUE.json")) != result["queue"]:
               raise SystemExit("Installed queue differs from validated snapshot")
           print(f"Restored validated queue SHA-256 {result['task_queue_sha256']}.")
-          PY
+
       - name: Initialize the first queue (explicit bootstrap only)
         if: ${{ steps.state.outputs.source_run_id == 'bootstrap' }}
         run: |
@@ -110,14 +156,15 @@ jobs:
               "id": "CYCLE-BOOTSTRAP-VERIFY",
               "type": "verify_test_scaffold",
               "source": "autopoesis/orchestrator.py",
-              "evidence": "Owner-authorized initial seed for the scheduled cycle; verifies the bounded runner path."
+              "evidence": "Explicit initial seed for the scheduled cycle; verifies the bounded runner path."
           }])
           print("Initialized one allowlisted verification task.")
-          PY
+
       - name: Run exactly one bounded cycle
         id: cycle
         continue-on-error: true
         run: python -m autopoesis.orchestrator --queue TASK_QUEUE.json --owner github-actions --root . --disable-file .autopoiesis-cycle-disabled --budget-seconds 600 | tee CYCLE_RESULT.json
+
       - name: Create state manifest
         if: always() && hashFiles('TASK_QUEUE.json') != ''
         env:
@@ -135,8 +182,9 @@ jobs:
               source_head_sha=os.environ["SOURCE_HEAD_SHA"],
               source_repository=os.environ["SOURCE_REPOSITORY"],
           )
-          Path("QUEUE_SNAPSHOT_MANIFEST.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+          Path("QUEUE_SNAPSHOT_MANIFEST.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\\n")
           PY
+
       - name: Persist next queue state
         if: always() && hashFiles('TASK_QUEUE.json') != ''
         uses: actions/upload-artifact@v4
@@ -148,49 +196,7 @@ jobs:
             CYCLE_RESULT.json
           if-no-files-found: error
           retention-days: 30
+
       - name: Propagate cycle refusal
         if: ${{ steps.cycle.outcome == 'failure' }}
-        run: exit 1      - name: Verify source run and artifact
-        if: ${{ steps.state.outputs.source_run_id != 'bootstrap' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN_ID: ${{ steps.state.outputs.source_run_id }}
-        run: |
-          set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" > .cycle-source.json
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" > .cycle-artifacts.json
-          python - <<'PY'
-          import json, os, re
-          from pathlib import Path
-          run = json.loads(Path(".cycle-source.json").read_text())
-          artifacts_payload = json.loads(Path(".cycle-artifacts.json").read_text())
-          expected_repo = os.environ["GITHUB_REPOSITORY"]
-          if run.get("conclusion") != "success" or run.get("head_branch") != "main":
-              raise SystemExit("Refusing: previous run is not successful on main")
-          if run.get("path", "").split("@", 1)[0] != ".github/workflows/autopoiesis-cycle.yml":
-              raise SystemExit("Refusing: source run belongs to another workflow")
-          if run.get("event") not in {"schedule", "workflow_dispatch"}:
-              raise SystemExit("Refusing: source run has an unexpected event")
-          repo = run.get("repository", {})
-          if not isinstance(repo, dict) or repo.get("full_name") != expected_repo:
-              raise SystemExit("Refusing: source run repository mismatch")
-          sha = run.get("head_sha")
-          if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
-              raise SystemExit("Refusing: source run SHA invalid")
-          artifacts = artifacts_payload.get("artifacts")
-          if not isinstance(artifacts, list):
-              raise SystemExit("Refusing: artifacts response malformed")
-          matches = [a for a in artifacts if isinstance(a, dict) and a.get("name") == "autopoiesis-cycle-state" and not a.get("expired", True)]
-          if len(matches) != 1:
-              raise SystemExit("Refusing: source must have exactly one unexpired state artifact")
-          artifact = matches[0]
-          binding = artifact.get("workflow_run")
-          if not isinstance(binding, dict) or str(binding.get("id")) != str(run.get("id")) or binding.get("head_sha") != sha:
-              raise SystemExit("Refusing: state artifact is not bound to source run and SHA")
-          if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(artifact.get("digest", ""))):
-              raise SystemExit("Refusing: state artifact digest missing or invalid")
-          Path("SOURCE_HEAD_SHA").write_text(sha)
-          print(f"Verified source run {run['id']} at {sha}, artifact {artifact.get('id')}, digest {artifact['digest']}.")
-          PY
-          echo "source_head_sha=$(cat SOURCE_HEAD_SHA)" >> "$GITHUB_OUTPUT"
-
+        run: exit 1
