@@ -271,15 +271,15 @@ def load_queue(path: Path) -> dict[str, Any]:
     for event in queue["history"]:
         task_id = event.get("task_id")
         if event.get("event") == "VERIFICATION_RECORDED":
-            # Verification cannot be appended after a terminal transition. The public
-            # writer already blocks this; replay must reject contradictory persisted history.
-            if latest_status.get(task_id) in {"DONE", "REJECTED"}:
+            # record_verification only writes while the task is IN_PROGRESS, so evidence
+            # recorded in any other state (including after DONE or REJECTED) is forged.
+            if task_id in latest_status and latest_status[task_id] != "IN_PROGRESS":
                 raise EvolutionError(
-                    f"Queue history records verification for terminal task {task_id!r}"
+                    f"Queue history records verification for task {task_id!r} "
+                    f"outside IN_PROGRESS (state {latest_status[task_id]!r})"
                 )
-            # The code revision and the lease cannot be compared here, because the code may
-            # have moved on and DONE clears the lease, but a PASS without them could never
-            # have authorized DONE.
+            # The code revision cannot be compared here, because the code may have moved on
+            # since completion, but a PASS without one could never have authorized DONE.
             bound = (
                 event.get("source") is not None
                 and event.get("source") == sources.get(task_id)
