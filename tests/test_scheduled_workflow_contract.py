@@ -25,7 +25,8 @@ class ScheduledWorkflowContractTests(unittest.TestCase):
     def test_execution_is_restricted_and_serialized(self):
         self.assertIn("github.repository == 'Autopoiesis-Intelligence/autopoiesis-core'", self.source)
         self.assertIn("github.ref == 'refs/heads/main'", self.source)
-        self.assertIn("vars.AUTOPOIESIS_CYCLE_DISABLED != 'true'", self.source)
+        self.assertIn("vars.AUTOPOIESIS_CYCLE_DISABLED == 'true'", self.source)
+        self.assertIn("Enforce emergency stop", self.source)
         self.assertIn("cancel-in-progress: false", self.source)
         self.assertIn("timeout-minutes: 20", self.source)
 
