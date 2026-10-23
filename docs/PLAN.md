@@ -35,7 +35,8 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 ### P1 — A9 task leases and recovery of stuck tasks — `IN_REVIEW` (PR #36, chained)
 - **Depends on:** #34 (and therefore #33). Built on the #34 branch; if #33/#34 change, A9 is rebuilt.
 - **Evidence so far:** at `4787a13` (contains #34 `480533b`): PR CI 39932167542, seed 39932159904, restore 39932194829. Codex P1s fixed: two live leases rejected on load; replayed PASS needs a revision and a lease token.
-- **Remaining:** a Codex verdict on current HEAD `ebf10296c48938d745599a52f67703a72b36d6f8`; owner confirmation of the ci.yml probe lines; merge after #34.
+- **Additional change:** the runner now exposes a `renew_lease` task handler so an external supervisor can renew a live lease using its current token. This is a renewal entry point, not an automatic heartbeat; unattended renewal while work runs remains unproven.
+- **Remaining:** CI on current HEAD `ebf10296c48938d745599a52f67703a72b36d6f8` (run `39994762812` success); a Codex verdict on that exact SHA; owner confirmation of the `ci.yml` probe lines; merge after #34.
 - **Design and test scenarios:** `/mnt/project-files/reviews/autonomous-stack/A9_LEASE_PLAN_2026-10-23.md`, summarized here.
 - **Acceptance:**
   1. The lease owner, token and expiry are persisted, validated by `load_queue`, and survive restore.
