@@ -206,7 +206,11 @@ class QueueHistoryValidationTests(unittest.TestCase):
             edge("IN_PROGRESS", "DONE", 4),
             post_done_failure,
         ])
-        with self.assertRaisesRegex(EvolutionError, "verification for terminal task"):
+        with self.assertRaisesRegex(EvolutionError, "outside IN_PROGRESS"):
+            load_queue(path)
+        # Evidence recorded before the attempt started cannot count either.
+        path = write([edge("OPEN", "SELECTED", 1), verification("PASS", 1), edge("SELECTED", "IN_PROGRESS", 2)])
+        with self.assertRaisesRegex(EvolutionError, "outside IN_PROGRESS"):
             load_queue(path)
 
     def test_rejects_attempt_counter_that_contradicts_history(self):
