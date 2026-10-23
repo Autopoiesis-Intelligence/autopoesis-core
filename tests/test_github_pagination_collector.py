@@ -100,6 +100,59 @@ class PaginationCollectorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Link header evidence"):
             validate_paginated_collection([page], collection_key="workflow_runs", expected_page_size=2)
 
+    def test_validator_rejects_nonterminal_page_without_raw_next_link(self):
+        pages = [
+            {"page": 1, "per_page": 2, "total_count": 3, "next_page": 2,
+             "request_url": page_url(1, 2), "link_header": None,
+             "workflow_runs": [{"id": 1}, {"id": 2}]},
+            {"page": 2, "per_page": 2, "total_count": 3, "next_page": None,
+             "request_url": page_url(2, 2), "link_header": None,
+             "workflow_runs": [{"id": 3}]},
+        ]
+        with self.assertRaisesRegex(ValueError, "missing next relation"):
+            validate_paginated_collection(pages, collection_key="workflow_runs", expected_page_size=2)
+
+    def test_validator_rejects_terminal_page_with_raw_next_link(self):
+        page = {"page": 1, "per_page": 2, "total_count": 1, "next_page": None,
+                "request_url": page_url(1, 2),
+                "link_header": f'<{page_url(2, 2)}>; rel="next"',
+                "workflow_runs": [{"id": 1}]}
+        with self.assertRaisesRegex(ValueError, "still advertises next"):
+            validate_paginated_collection([page], collection_key="workflow_runs", expected_page_size=2)
+
+    def test_validator_rejects_raw_next_page_mismatch(self):
+        pages = [
+            {"page": 1, "per_page": 2, "total_count": 3, "next_page": 2,
+             "request_url": page_url(1, 2), "link_header": f'<{page_url(3, 2)}>; rel="next"',
+             "workflow_runs": [{"id": 1}, {"id": 2}]},
+            {"page": 2, "per_page": 2, "total_count": 3, "next_page": None,
+             "request_url": page_url(2, 2), "link_header": None,
+             "workflow_runs": [{"id": 3}]},
+        ]
+        with self.assertRaisesRegex(ValueError, "raw next URL disagrees"):
+            validate_paginated_collection(pages, collection_key="workflow_runs", expected_page_size=2)
+
+    def test_validator_rejects_request_url_page_or_size_mismatch(self):
+        page = {"page": 1, "per_page": 2, "total_count": 1, "next_page": None,
+                "request_url": f"{BASE}?per_page=3&page=2", "link_header": None,
+                "workflow_runs": [{"id": 1}]}
+        with self.assertRaisesRegex(ValueError, "request URL page disagrees"):
+            validate_paginated_collection([page], collection_key="workflow_runs", expected_page_size=2)
+
+    def test_validator_rejects_raw_next_filter_change(self):
+        changed = f"{BASE}?event=workflow_dispatch&status=failure&per_page=2&page=2"
+        pages = [
+            {"page": 1, "per_page": 2, "total_count": 3, "next_page": 2,
+             "request_url": f"{BASE}?event=workflow_dispatch&status=success&per_page=2&page=1",
+             "link_header": f'<{changed}>; rel="next"',
+             "workflow_runs": [{"id": 1}, {"id": 2}]},
+            {"page": 2, "per_page": 2, "total_count": 3, "next_page": None,
+             "request_url": f"{BASE}?event=workflow_dispatch&status=success&per_page=2&page=2",
+             "link_header": None, "workflow_runs": [{"id": 3}]},
+        ]
+        with self.assertRaisesRegex(ValueError, "raw next URL changes endpoint or fixed query filters"):
+            validate_paginated_collection(pages, collection_key="workflow_runs", expected_page_size=2)
+
     def test_missing_page_blocks(self):
         pages = [
             {"page": 1, "per_page": 2, "total_count": 3, "next_page": 2,
