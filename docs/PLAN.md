@@ -15,7 +15,8 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 
 - Live `main` resolved to `4ae19f49f480246a2b42a3e9457190d43f03db6b`.
 - PRs #33, #34, #35 and #36 now contain `main` at `4ae19f49f480246a2b42a3e9457190d43f03db6b`; the chain #33 → #34 → #36 was rebuilt in order. Verification evidence is accepted only while a task is `IN_PROGRESS` (#33, carried into #34 and #36). CI evidence for each head is on its PR.
-- PR #37 is 22 commits behind `main` and is based on the older theory baseline `685c5a0ce188314bbcf49c822f9a2222b9b3a22b`; do not merge it until rebased/rebuilt against current `main`, then re-audited.
+- PR #37 head `e86a72c` is 5 commits ahead of and 0 behind `main` `4ae19f4`; exact-head CI run 40019283824 success. Its theory sources still need an independent audit before merge.
+- PR #40 (A13 scheduled cycle, head `e691a2d`) is stacked on `claude/cl-020-a10-cycle`, has no `Agent:` line, and adds a workflow; it needs the owner's permission for the workflow and an author attribution before review. With #40 there are six open PRs in this workstream; no new PR opens until the owner reconciles the count.
 - The available workflow-run lookup did not establish a CI run for the exact live `main` SHA. Treat `main` CI as unverified until a run tied to that SHA is confirmed.
 
 ## Current blockers
