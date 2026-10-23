@@ -9,8 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-WORKFLOW_PATH = ".github/workflows/autopoiesis-cycle.yml"
-ARTIFACT_NAME = "autopoiesis-cycle-state"
+WORKFLOW_PATH = ".github/workflows/ci.yml"
+ARTIFACT_NAME = "autopoesis-core-results"
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _QUEUE_SHA256 = re.compile(r"^[0-9a-f]{64}$")
