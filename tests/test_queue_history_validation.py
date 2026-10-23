@@ -8,9 +8,9 @@ from unittest.mock import patch
 
 from autopoesis.core import EvolutionError
 from autopoesis.task_queue import (
+    advance_task,
+    advance_task_file,
     load_queue,
-    record_outcome,
-    record_outcome_file,
     record_verification_file,
     update_queue_file,
 )
@@ -104,10 +104,10 @@ class QueueHistoryValidationTests(unittest.TestCase):
             "history": [],
         }
         with self.assertRaisesRegex(EvolutionError, "note must be a string"):
-            record_outcome(queue, "TASK-1", "DONE", ["not a note"])
+            advance_task(queue, "TASK-1", "SELECTED", ["not a note"])
         queue["items"][0]["attempts"] = -1
         with self.assertRaisesRegex(EvolutionError, "attempts count"):
-            record_outcome(queue, "TASK-1", "IN_PROGRESS")
+            advance_task(queue, "TASK-1", "SELECTED")
 
     def test_rejects_invalid_status_transition_history(self):
         with self.assertRaisesRegex(EvolutionError, "destination status"):
@@ -219,7 +219,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(EvolutionError, "Unsupported verification status"):
                 record_verification_file(path, "CORE-007", ["PASS"], "GENERATED_TEST_EXECUTION")
             with self.assertRaisesRegex(EvolutionError, "Unsupported queue status"):
-                record_outcome_file(path, "TASK-1", ["DONE"], "invalid status type")
+                advance_task_file(path, "TASK-1", ["DONE"], "invalid status type")
 
     def test_accepts_history_written_by_queue_helpers(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -229,7 +229,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
                 "type": "proposal",
                 "description": "test",
             }])
-            record_outcome_file(path, "TASK-1", "DONE", "test transition")
+            advance_task_file(path, "TASK-1", "SELECTED", "test transition")
             queue = load_queue(path)
             self.assertEqual([event["event"] for event in queue["history"]], [
                 "CANDIDATE_ADDED",
@@ -244,7 +244,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
 
             with patch("autopoesis.task_queue.os.replace", side_effect=OSError("disk error")):
                 with self.assertRaisesRegex(OSError, "disk error"):
-                    record_outcome_file(path, "TASK-1", "DONE", "must not partially persist")
+                    advance_task_file(path, "TASK-1", "SELECTED", "must not partially persist")
 
             self.assertEqual(path.read_bytes(), original_bytes)
             self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])

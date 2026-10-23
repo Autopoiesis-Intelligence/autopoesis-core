@@ -257,7 +257,9 @@ jobs:
           # Walk the governed lifecycle: DONE is accepted only after a PASS since IN_PROGRESS.
           advance_task_file(queue_path, probe["id"], "SELECTED", note)
           advance_task_file(queue_path, probe["id"], "IN_PROGRESS", note)
-          record_verification_file(queue_path, probe["id"], "PASS", "CI_SYNTHETIC_PERSISTENCE_PROBE")
+          record_verification_file(
+              queue_path, probe["id"], "PASS", "CI_SYNTHETIC_PERSISTENCE_PROBE", source=probe["source"]
+          )
           advance_task_file(queue_path, probe["id"], "DONE", note)
           record_verification_file(
               queue_path,

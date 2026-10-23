@@ -171,6 +171,7 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
             result["verification_status"],
             "GENERATED_TEST_EXECUTION",
             result.get("artifact_sha256"),
+            task.get("source"),
         )
 
     task_status = "FAIL" if result.get("verification_status") == "FAIL" else "PASS"
