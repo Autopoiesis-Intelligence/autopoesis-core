@@ -195,7 +195,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             self.assertEqual(result["queue"], expected_queue)
             self.assertEqual(result["size_bytes"], snapshot.stat().st_size)
             self.assertNotEqual(destination.read_bytes(), original)
-            self.assertEqual(list(root.glob(".TASK_QUEUE.json.restore-*.tmp")), [])
+            self.assertEqual(list(install_dir.glob(".TASK_QUEUE.json.restore-*.tmp")), [])
 
     def test_atomic_install_preserves_existing_destination_if_staging_validation_fails(self):
         with tempfile.TemporaryDirectory() as directory:
