@@ -269,10 +269,13 @@ def load_queue(path: Path) -> dict[str, Any]:
     for event in queue["history"]:
         task_id = event.get("task_id")
         if event.get("event") == "VERIFICATION_RECORDED":
+            # The code revision cannot be compared here, because the code may have moved on
+            # since completion, but a PASS without one could never have authorized DONE.
             bound = (
                 event.get("source") is not None
                 and event.get("source") == sources.get(task_id)
                 and event.get("attempt") == replayed_attempts.get(task_id)
+                and _is_digest(event.get("revision"))
             )
             latest_verification[task_id] = event["verification_status"] if bound else None
             continue
@@ -299,6 +302,11 @@ def load_queue(path: Path) -> dict[str, Any]:
         latest_status[task_id] = event["to"]
     for item in queue["items"]:
         task_id = item["id"]
+        if task_id in latest_status and item.get("attempts", 0) != replayed_attempts.get(task_id, 0):
+            raise EvolutionError(
+                f"Queue attempts/history mismatch for task {task_id!r}: item says {item.get('attempts', 0)}, "
+                f"history has {replayed_attempts.get(task_id, 0)} IN_PROGRESS transitions"
+            )
         recorded_status = latest_status.get(task_id)
         if recorded_status is not None and recorded_status != item["status"]:
             raise EvolutionError(
