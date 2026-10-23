@@ -111,7 +111,15 @@ def run_cycle(
     budget_seconds: float = DEFAULT_BUDGET_SECONDS,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
-    """Run at most one task to an outcome; never raises for a task's own failure."""
+    """Run at most one task to an outcome; never raises for a task's own failure.
+
+    Time bounds: `budget_seconds` bounds the handler, including building and handing over its
+    result, because that all happens in a child process killed at the deadline. Each queue step
+    waits at most LOCK_RETRIES * LOCK_RETRY_SECONDS for the lock and then refuses. A cycle has
+    at most five locked queue steps, so its wall time is at most the budget plus five lock waits.
+    A handler that does not finish within the budget gets no verification and no DONE. The
+    result size cap limits what is accepted, not the child's memory use while it builds the result.
+    """
     handlers = HANDLERS if handlers is None else handlers
     if disable_path is not None and disable_path.exists():
         return {"status": "DISABLED", "reason": f"disable switch present at {disable_path.as_posix()}"}

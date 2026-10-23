@@ -13,11 +13,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from autopoesis.executor import source_tree_digest
-from autopoesis.orchestrator import HANDLERS, run_cycle
+from autopoesis.orchestrator import HANDLERS, LOCK_RETRIES, LOCK_RETRY_SECONDS, run_cycle
 from autopoesis.task_queue import (
     LEASE_TTL,
     advance_task_file,
     load_queue,
+    queue_write_lock,
     recover_expired_leases_file,
     select_next_task_file,
     update_queue_file,
@@ -138,6 +139,17 @@ class OrchestratorTests(unittest.TestCase):
         self.assertFalse(self.events("VERIFICATION_RECORDED"))
         self.assertEqual(run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing})["final"],
                          "DONE")
+
+    def test_held_queue_lock_refuses_in_bounded_time_without_writes(self):
+        update_queue_file(self.path, [task()])
+        before = self.path.read_bytes()
+        started = time.monotonic()
+        with queue_write_lock(self.path):
+            result = run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing})
+        self.assertLess(time.monotonic() - started, LOCK_RETRIES * LOCK_RETRY_SECONDS + 5)
+        self.assertEqual(result["status"], "REFUSED")
+        self.assertIn("locked by another writer", result["reason"])
+        self.assertEqual(self.path.read_bytes(), before)
 
     def test_slow_result_delivery_is_still_bounded(self):
         update_queue_file(self.path, [task()])
