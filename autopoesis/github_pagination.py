@@ -15,10 +15,12 @@ _LINK_PART = re.compile(r',(?=\s*<)')
 
 
 def _links(header: str | None) -> dict[str, str]:
-    if header is None or header.strip() == "":
+    if header is None:
         return {}
     if not isinstance(header, str):
         raise ValueError("Link header must be text or None")
+    if header.strip() == "":
+        return {}
     result: dict[str, str] = {}
     for part in _LINK_PART.split(header):
         match = re.fullmatch(r'\s*<([^>]+)>\s*;\s*rel="([^"]+)"\s*', part)
@@ -75,6 +77,11 @@ def collect_paginated_collection(
         links = _links(link_header)
         next_url = links.get("next")
         next_page = _page_from_url(next_url, expected_page_size=expected_page_size) if next_url else None
+        if next_url:
+            current = urlparse(request_url)
+            target = urlparse(next_url)
+            if (target.scheme, target.netloc, target.path) != (current.scheme, current.netloc, current.path):
+                raise ValueError("Next-page URL changes API origin or endpoint")
         if next_page is not None and next_page != page_number + 1:
             raise ValueError(f"Page {page_number} Link header skips or repeats a page")
         if "last" in links and next_page is None and _page_from_url(links["last"], expected_page_size=expected_page_size) != page_number:
