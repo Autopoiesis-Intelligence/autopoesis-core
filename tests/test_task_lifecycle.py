@@ -146,13 +146,14 @@ class TaskLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "TASK_QUEUE.json"
             update_queue_file(path, [{"id": "TASK-1", "type": "proposal", "source": SOURCE}])
-            advance_task_file(path, "TASK-1", "SELECTED")
-            advance_task_file(path, "TASK-1", "IN_PROGRESS")
+            step_file(path, "TASK-1", "SELECTED", "IN_PROGRESS")
+            token = token_of(load_queue(path), "TASK-1")
             before = path.read_bytes()
             for attempt in (True, 1.0, "1", 0):
                 with self.subTest(attempt=attempt):
                     with self.assertRaisesRegex(EvolutionError, "attempt must be a positive integer"):
-                        record_verification_file(path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=attempt)
+                        record_verification_file(path, "TASK-1", "PASS", "unit", source=SOURCE, attempt=attempt,
+                                                 token=token)
             self.assertEqual(path.read_bytes(), before)
             load_queue(path)
 
