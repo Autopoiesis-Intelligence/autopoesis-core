@@ -51,7 +51,7 @@ This table is the answer to "where is the project state". Each kind of state has
 | Theory | `docs/theory/` | PR #37 (CL-016, branch `claude/project-thread-ofxc12`), not merged. This file does not duplicate it |
 | Roadmap A0–A12 | `docs/AUTONOMY_ROADMAP_SPEC.md` on `main` | |
 | Overall progress | header of `docs/PLAN.md` | Not written yet. Denominator: the 13 stages A0–A12. A stage counts only when its acceptance criteria are met on `main` with CI on the merge commit. Anything else is reported as `NOT MEASURED`, never as a guessed percentage |
-| Link task ↔ theory | `Theory:` field of a task in `docs/PLAN.md` (CLM-/OQ- IDs); task ID in the row of `docs/theory/THEORY_TO_CODE.md` | Not written yet; needs edits to PR #35 and PR #37 |
+| Link task ↔ theory | `Theory:` field of a task in `docs/PLAN.md` (CLM-/OQ- IDs); task ID in the row of `docs/theory/THEORY_TO_CODE.md` | Described, not filled: 0 tasks carry `Theory:` in `docs/PLAN.md` at `c70e7a7` (PR #35), and 0 THEORY_TO_CODE rows name a task ID at `69766f1` (PR #37). A described link is not a filled one |
 | Claims, handoffs, live coordination | Issue #22 | Protocol in `docs/coordination/PROTOCOL.md`, PR #32, **not merged** |
 | Audit verdicts | the PR they audit, as an issue comment | Format in `AGENTS.md`. A copy in a chat proves nothing |
 | CI and the core's Copilot runs | GitHub Actions | `ci.yml` (`test` is the required check), `copilot-test-writer.yml`, `copilot-agent-trial.yml`, `copilot-smoke.yml` |
@@ -152,6 +152,8 @@ Proposed (owner, 2026-10-23 15:38 UTC: "do not declare it final before my agreem
 
 ### Messages
 
+There are four message types: TASK, REPORT, VERDICT and STATE. STATE is not a separate format: it is REPORT in full mode.
+
 **TASK** (owner or GPT → Claude). Claude adds it to `docs/PLAN.md` if it is not there.
 
 ```
@@ -165,15 +167,28 @@ Approved: <what the owner explicitly allowed, or none>
 **REPORT** (Claude → owner or GPT). One line per task that changed, then the shared fields.
 
 ```
-REPORT <UTC date>
-<ID> <task status> <PR> <head SHA7> CI <run id> <ok|fail> — <what changed, one line>
+REPORT <UTC date> CYCLE <cycle ID>
+<ID> <task status> <PR> <head SHA, 40 chars> CI <run id> <ok|fail> — <what changed, one line>
+Tests: <command> — <passed/failed counts>
 Proven: <claim — evidence>
 Not proven: <claim — what is missing>
+Defects: <open findings or failures, each with file/run, or none>
 NEEDS_OWNER: <exact question, or merge PR#/SHA, or NONE>
 NEXT: <ID — step — completion criterion>
 ```
 
-The full BEFORE → ACTION → AFTER → RESULT report from `AGENTS.md` is written for a significant change only, in the PR body, not in chat. A request for the whole state ("state?") is answered with the same REPORT over all open tasks, built from GitHub and `docs/PLAN.md`, not from memory. "Next" (Далее) means: continue the first `READY` task in `docs/PLAN.md`, within authority and the PR limit.
+The full BEFORE → ACTION → AFTER → RESULT report from `AGENTS.md` is written for a significant change only, in the PR body, not in chat. **STATE** (any party asks "state?"): a REPORT in full mode, with one line for every open task instead of only the changed ones, plus `Progress: <stages met>/13 A-stages, or NOT MEASURED>`. It is built from GitHub and `docs/PLAN.md`, not from memory.
+
+**Machine fields from the earlier handoff format.** They are kept as REPORT fields, not as a separate record:
+
+| Earlier field | REPORT field |
+|---|---|
+| `CYCLE_ID` | `CYCLE` (the tick or session that produced the report) |
+| `STATE` | task status in each task line |
+| `VERIFIED` | `Proven` |
+| `DEFECTS` | `Defects` |
+| `TESTS` | `Tests` and the CI run in each task line |
+| `REQUESTED_ACTION` | `NEEDS_OWNER` and `NEXT` | "Next" (Далее) means: continue the first `READY` task in `docs/PLAN.md`, within authority and the PR limit.
 
 **Audit handoff with ChatGPT.** These two blocks are kept as they were agreed. ChatGPT has no proven unattended channel yet (see "Automation status"), so the owner may carry them. Every field names exact values. "unknown" is a valid answer; a guess is not.
 
@@ -217,6 +232,8 @@ Next SEQ: <one step, acceptance criteria, permissions it needs>
 - **Independent check.** A REPORT is the executor's account, not independent confirmation. Every SHA and run id in it can be checked directly: `https://api.github.com/repos/Autopoiesis-Intelligence/autopoiesis-core/actions/runs/<run id>` shows `head_sha` and `conclusion`.
 
 ### What exists and what is only described
+
+Checked against GitHub on 2026-10-23 (`main` = `4f730e7`). The text of this file is not evidence that anything runs; each row changes only with a new GitHub observation.
 
 | Part | State |
 |---|---|
