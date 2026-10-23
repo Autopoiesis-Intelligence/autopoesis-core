@@ -11,6 +11,13 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 - **Evidence:** a verdict counts only per `AGENTS.md` ("Review and audit"): an issue comment through the Codex app that names the PR and the exact head SHA. Green CI, a bot reaction or a chat message is not approval.
 - **Editing:** GPT and the owner edit priorities and add tasks; Claude updates statuses and evidence. Disagreements go to Issue #22, not into silent edits.
 
+## Integration freshness (2026-10-23)
+
+- Live `main` resolved to `4ae19f49f480246a2b42a3e9457190d43f03db6b`.
+- PRs #33, #34, #35 and #36 compare as `diverged` with `main`: each is 3 commits behind, and GitHub currently reports each as mergeable. This is not proof of a conflict; re-check the merge base and CI after upstream integration, and refresh dependent branches before relying on their old CI.
+- PR #37 is 22 commits behind `main` and is based on the older theory baseline `685c5a0ce188314bbcf49c822f9a2222b9b3a22b`; do not merge it until rebased/rebuilt against current `main`, then re-audited.
+- The available workflow-run lookup did not establish a CI run for the exact live `main` SHA. Treat `main` CI as unverified until a run tied to that SHA is confirmed.
+
 ## Current blockers
 
 | Blocker | Unblocks | Who |
