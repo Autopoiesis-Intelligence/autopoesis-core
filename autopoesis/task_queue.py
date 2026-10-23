@@ -269,13 +269,15 @@ def load_queue(path: Path) -> dict[str, Any]:
     for event in queue["history"]:
         task_id = event.get("task_id")
         if event.get("event") == "VERIFICATION_RECORDED":
-            # The code revision cannot be compared here, because the code may have moved on
-            # since completion, but a PASS without one could never have authorized DONE.
+            # The code revision and the lease cannot be compared here, because the code may
+            # have moved on and DONE clears the lease, but a PASS without them could never
+            # have authorized DONE.
             bound = (
                 event.get("source") is not None
                 and event.get("source") == sources.get(task_id)
                 and event.get("attempt") == replayed_attempts.get(task_id)
                 and _is_digest(event.get("revision"))
+                and _is_token(event.get("lease_token"))
             )
             latest_verification[task_id] = event["verification_status"] if bound else None
             continue

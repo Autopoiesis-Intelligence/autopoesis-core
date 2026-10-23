@@ -166,12 +166,14 @@ class QueueHistoryValidationTests(unittest.TestCase):
             return {"event": "STATUS_CHANGED", "task_id": "TASK-1", "from": start, "to": end,
                     "note": "", "at": f"2026-01-01T00:00:0{second}+00:00"}
 
-        def verification(status, attempt, source="tests/example.py", revision="a" * 64):
+        def verification(status, attempt, source="tests/example.py", revision="a" * 64, lease_token="b" * 32):
             event = {"event": "VERIFICATION_RECORDED", "task_id": "TASK-1", "verification_status": status,
                      "verification_level": "unit", "artifact_sha256": None, "source": source,
                      "attempt": attempt, "at": "2026-01-01T00:00:03+00:00"}
             if revision is not None:
                 event["revision"] = revision
+            if lease_token is not None:
+                event["lease_token"] = lease_token
             return event
 
         def write(events):
@@ -188,6 +190,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
             "FAIL": walk + [verification("FAIL", 1)],
             "other source": walk + [verification("PASS", 1, source="other.py")],
             "no revision": walk + [verification("PASS", 1, revision=None)],
+            "no lease token": walk + [verification("PASS", 1, lease_token=None)],
             "earlier attempt": walk + [verification("PASS", 1), edge("IN_PROGRESS", "OPEN", 3),
                                        edge("OPEN", "SELECTED", 3), edge("SELECTED", "IN_PROGRESS", 3)],
         }
