@@ -49,6 +49,19 @@ class RecoveryProposalTests(unittest.TestCase):
         self.assertEqual(result["status"], "BLOCKED")
         self.assertIn("history completeness", result["reason"])
 
+    def test_missing_history_completeness_flag_blocks(self):
+        evidence = valid_evidence()
+        del evidence["history_complete"]
+        result = build_recovery_proposal(evidence)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("history completeness", result["reason"])
+
+    def test_github_api_repository_object_is_normalized(self):
+        evidence = valid_evidence()
+        evidence["runs"][0]["repository"] = {"full_name": REPO}
+        result = build_recovery_proposal(evidence)
+        self.assertEqual(result["status"], "PROPOSAL_READY")
+
     def test_no_evidence_blocks(self):
         result = build_recovery_proposal({"repository": REPO, "history_complete": True, "runs": [], "artifacts": []})
         self.assertEqual(result["status"], "BLOCKED")
