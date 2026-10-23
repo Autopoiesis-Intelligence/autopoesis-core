@@ -76,7 +76,7 @@ class ScheduledWorkflowContractTests(unittest.TestCase):
         self.assertIn("create_queue_snapshot_manifest", self.source)
         self.assertIn("QUEUE_SNAPSHOT_MANIFEST.json", self.source)
         self.assertIn("name: autopoiesis-cycle-state", self.source)
-        self.assertIn("retention-days: 30", self.source)
+        self.assertIn("retention-days: 90", self.source)
 
 
 if __name__ == "__main__":
