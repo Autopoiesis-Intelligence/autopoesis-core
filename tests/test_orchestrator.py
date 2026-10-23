@@ -271,5 +271,17 @@ class OrchestratorTests(unittest.TestCase):
         self.assertFalse(any(event["event"] == "VERIFICATION_RECORDED" for event in queue["history"]))
 
 
+    def test_command_line_no_work_exits_zero(self):
+        update_queue_file(self.path, [])
+        completed = subprocess.run(
+            [sys.executable, "-m", "autopoesis.orchestrator", "--queue", str(self.path), "--owner", "ci",
+             "--root", str(self.repo)],
+            cwd=ROOT, capture_output=True, text=True, timeout=120, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertEqual((result["status"], result["final"]), ("NO_WORK", "NO_WORK"))
+
+
 if __name__ == "__main__":
     unittest.main()
