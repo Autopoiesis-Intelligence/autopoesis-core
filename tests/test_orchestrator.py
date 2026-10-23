@@ -280,7 +280,8 @@ class OrchestratorTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         result = json.loads(completed.stdout)
-        self.assertEqual((result["status"], result["final"]), ("NO_WORK", "NO_WORK"))
+        self.assertEqual(result["status"], "NO_WORK")
+        self.assertNotIn("final", result)
 
 
 if __name__ == "__main__":
