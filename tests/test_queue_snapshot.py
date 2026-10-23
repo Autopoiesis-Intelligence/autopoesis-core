@@ -60,17 +60,33 @@ class QueueSnapshotTests(unittest.TestCase):
             expected_repository=REPOSITORY,
         )
 
-    def valid_artifacts(self):
-        return {
-            "artifacts": [{
-                "id": 77,
-                "name": "autopoesis-core-results",
-                "expired": False,
-                "digest": ARTIFACT_DIGEST,
-                "size_in_bytes": 1024,
-                "workflow_run": {"id": RUN_ID, "head_sha": SHA},
-            }]
+    def _artifact_payload(self, artifacts):
+        page = {
+            "page": 1,
+            "per_page": 100,
+            "total_count": len(artifacts),
+            "next_page": None,
+            "request_url": f"https://api.github.com/repos/example/repo/actions/runs/{RUN_ID}/artifacts?per_page=100&page=1",
+            "link_header": None,
+            "artifacts": artifacts,
         }
+        return {
+            "artifacts": artifacts,
+            "total_count": len(artifacts),
+            "pagination_evidence": {
+                "complete": True, "page_count": 1, "pages": [page],
+            },
+        }
+
+    def valid_artifacts(self):
+        return self._artifact_payload([{
+            "id": 77,
+            "name": "autopoesis-core-results",
+            "expired": False,
+            "digest": ARTIFACT_DIGEST,
+            "size_in_bytes": 1024,
+            "workflow_run": {"id": RUN_ID, "head_sha": SHA},
+        }])
 
     def test_manifest_binds_snapshot_bytes_and_source(self):
         manifest = self.valid_manifest()
@@ -220,13 +236,11 @@ class QueueSnapshotTests(unittest.TestCase):
         self.assertEqual(result["source_artifact_size_bytes"], 1024)
 
     def test_artifact_binding_rejects_missing_duplicate_or_expired_artifact(self):
+        artifact = self.valid_artifacts()["artifacts"][0]
         cases = (
-            {"artifacts": []},
-            {"artifacts": [
-                self.valid_artifacts()["artifacts"][0],
-                self.valid_artifacts()["artifacts"][0],
-            ]},
-            {"artifacts": [{**self.valid_artifacts()["artifacts"][0], "expired": True}]},
+            self._artifact_payload([]),
+            self._artifact_payload([artifact, {**artifact, "id": 78}]),
+            self._artifact_payload([{**artifact, "expired": True}]),
         )
         for payload in cases:
             with self.subTest(payload=payload):
@@ -247,7 +261,7 @@ class QueueSnapshotTests(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
                     bind_source_artifact(
-                        self.valid_provenance(), {"artifacts": [changed]},
+                        self.valid_provenance(), self._artifact_payload([changed]),
                         requested_run_id=RUN_ID,
                     )
 
