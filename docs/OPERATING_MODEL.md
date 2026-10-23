@@ -4,9 +4,11 @@ This document is the single place that says who does what in the agent stack aro
 
 [`AGENTS.md`](../AGENTS.md) remains the source of the project's rules: the evidence ladder, the audit verdict format, the merge rules and the report format. This document does not repeat or change them. If the two ever disagree, `AGENTS.md` wins and the disagreement is a bug to fix here.
 
-Status of this document: proposed in a PR (CL-017). It becomes the agreed model only when the owner merges it. Roles below were stated by the owner on 2026-10-23 14:50 UTC in the project thread, unless marked otherwise.
+Status of this document: proposed in a PR (CL-017). It becomes the agreed model only when the owner merges it. The target architecture below was fixed by the owner on 2026-10-23 (14:50 and 15:17 UTC) in the project thread, unless marked otherwise.
 
-Manus is not part of the stack (owner, 2026-10-23 14:56 UTC). Its earlier conventions (`MN-`, `manus/`, `agent:manus`) are retired for new work; past posts and labels stay as history.
+## Not part of the stack
+
+DeepSeek, Perplexity and Manus are excluded (owner, 2026-10-23). They are not to be brought back into instructions, `AGENTS.md`, workflows, scripts, configurations or automation plans. Manus's conventions (`MN-`, `manus/`, `agent:manus`) are retired; past posts and labels stay as history. Remaining traces in other repositories are listed for removal by the repository clean-up, not here.
 
 ## Two loops
 
@@ -16,11 +18,12 @@ Keep them apart. The **development loop** is how agents build this repository. *
 
 | Who | Responsible for | Does not |
 |---|---|---|
-| **Owner** (yarik) | Theory together with ChatGPT; architectural decisions; every merge; approval of workflow, permission and settings changes; decisions listed as open below | Need to move tasks between agents by hand, look for PRs or start checks. The stack must bring him only the decisions that are his |
-| **ChatGPT** (GPT) | Theory, architecture, critical analysis and control of evidence; acceptance criteria and priorities in `docs/PLAN.md`; periodically telling the owner when a merge decision is needed | Write core code; merge |
-| **Claude** | Main engineer: implements tasks, writes tests, keeps CI green, keeps `docs/PLAN.md` statuses and evidence current, develops the automation of this loop | Merge its own PRs; change workflows, permissions or settings without the owner's explicit approval for that change |
-| **Codex** | Independent audit of one exact head SHA of a PR | Write the change it audits. A missing Codex verdict blocks the merge of that PR only, never independent development |
-| **GitHub Copilot (Free plan)** | Executor of tasks inside the core's self-update mechanism. The core spends Copilot's whole monthly budget on improving itself; nothing is reserved for manual use (owner, 2026-10-19) | Act as a general test helper for other agents; get its output into `main` without the same review, CI and owner merge as everyone else |
+| **Autopoiesis Core** (this repository's code) | The minimal kernel of evolution and self-update: the allowed cycle of changes, checking their results, and keeping confirmed state | Depend on an outside model as a hidden source of authority or as an outside selector of decisions |
+| **GitHub Copilot (Free plan)** | The core's own self-update tool: carries out the development and self-update tasks the core's protocol provides for, on its own, within that protocol. The core spends Copilot's whole monthly budget on itself; nothing is reserved for manual use (owner, 2026-10-19) | Act as a test helper or a backup for Claude; bypass checks; get its output into `main` without the same CI, audit and owner merge as everyone else |
+| **Claude (Pro)** | Main engineer: implements tasks, fixes code and CI, tests, prepares PRs and follows their review, keeps `docs/PLAN.md` statuses and evidence current, develops the automation of this loop, and continues engineering work on its own within the agreed authority | Merge; change `main` without the owner's explicit permission; change workflows, permissions or settings without his explicit approval for that change |
+| **ChatGPT / GPT-Codex** | Architectural control and independent audit: checks architectural decisions, changes, the exact SHA, tests, CI and evidence of execution; publishes verifiable verdicts through a channel that actually works; theory together with the owner; tells the owner when a merge decision is due | Write the change it audits; treat an old audit as evidence for a new SHA. A missing verdict blocks the merge of that PR only, never independent development |
+| **GitHub and GitHub Actions** | GitHub is the canonical state of code, tasks, PRs and history. Actions runs CI and automation | Count as working because a workflow exists: only run results prove it |
+| **Owner** (yarik) | Theory with ChatGPT; architectural decisions; every merge; approval of workflow, permission and settings changes; the open decisions below | Move tasks between agents by hand, look for PRs or start checks. The stack brings him only the decisions that are his |
 
 ### Identity on the shared account
 
@@ -43,7 +46,7 @@ Today `AGENTS.md` counts a verdict only from an issue comment posted through app
 | Rules | `AGENTS.md` on `main` | Changes only through a reviewed PR the owner merges |
 | Roles, task flow, automation status | this file | Status table updated with evidence, never in advance |
 | Ordered task plan | `docs/PLAN.md` | PR #35, **not merged** as of `685c5a0`. Owner sets priorities, GPT adds criteria, Claude updates statuses and evidence |
-| Theory | `docs/theory/` | Being written in a separate thread (CL-016, branch `claude/project-thread-ofxc12`, not merged). This file does not duplicate it |
+| Theory | `docs/theory/` | PR #37 (CL-016, branch `claude/project-thread-ofxc12`), not merged. This file does not duplicate it |
 | Roadmap A0–A12 | `docs/AUTONOMY_ROADMAP_SPEC.md` on `main` | |
 | Claims, handoffs, live coordination | Issue #22 | Protocol in `docs/coordination/PROTOCOL.md`, PR #32, **not merged** |
 | Audit verdicts | the PR they audit | Format in `AGENTS.md` |
@@ -62,6 +65,38 @@ Live GitHub state (refs, SHAs, runs) outranks every document and every chat summ
 7. **Record.** After the merge, Claude marks the task `DONE` in `docs/PLAN.md` with the merge SHA and the CI run on it.
 
 While a PR waits for an audit, work that does not depend on it continues. At most 5 own Claude PRs wait at once (owner, 2026-10-23); beyond that a finished branch is kept and recorded in the plan instead of opened as a PR.
+
+## The self-update cycle, stage by stage
+
+Target cycle: Task Discovery → Claim → Execution → CI → Audit → Validation → Persistence → Human Merge. "Automated" means a stage runs without a person starting that action, with the evidence named; "agent" means an agent does it when it runs; "manual" means a person does it; "missing" means nothing implements it yet. Checked against `main` = `685c5a0`.
+
+| Stage | Development loop today | Copilot today | Evidence or gap |
+|---|---|---|---|
+| Task Discovery | Agent: Claude reads `docs/PLAN.md` (PR #35, not merged), written by the owner and GPT | Missing: the dispatcher chooses one of two fixed modules (`executor.py`, `task_queue.py`) as a workflow input | Next-task selection inside the core is PR #34 (A4), not merged |
+| Claim | Agent: claims in Issue #22 | Missing | Claim checker only on PR #32's branch |
+| Execution | Agent: Claude in its sessions | Automated **within a run**: Copilot CLI writes one test file with read-only tools, under a credit cap set by the core | Runs 39356711683 and 39523564470, job "Copilot writes one test file" success. Each run was started by a manual `workflow_dispatch` |
+| CI | Automated | Automated **within a run**: the core validates the patch scope (`copilot_writer.py`), then a job with no permissions and no network runs only the new test on a throwaway copy | `ci.yml` on every PR; verify job success in both Copilot runs |
+| Audit | Agent: Codex on request (blocked by usage limit since 2026-10-23 09:30 UTC); GPT when the owner opens a session | Manual: GPT content review of the artifact | Run 39356711683's test REJECTED for duplication; run 39523564470 still waits |
+| Validation | Agent: Claude recomputes labels with `audit_verdict.py` | Missing | The repository does not apply labels itself |
+| Persistence | Manual: only a merge persists a change | Missing: the result is an artifact kept 7 days (artifact 12311398353 expires 2026-10-28); nothing is pushed, no branch or PR is opened | No path from a Copilot artifact to a commit exists |
+| Human Merge | Manual, by design | Manual, by design | See "No automatic merge" |
+
+### What Copilot can do on its own today
+
+Once a run is started, Copilot writes one new test file and the core checks its scope and runs it in isolation, without anyone touching it. That is execution and a first check, at the RUNTIME level, for one task kind (a test file for one of two modules).
+
+It cannot yet start itself, pick its own task, claim it, turn an accepted result into a branch or PR, or keep its result beyond the 7-day artifact. All three Copilot workflows are `workflow_dispatch` only. So Copilot is not yet a self-update tool that runs without a manual start of each run, and that must not be claimed until a run without a manual start is observed. Making it one needs, at least, a trigger the core owns (for example a schedule that asks the budget and the plan) and a bounded path from an accepted artifact to a PR. Both touch workflows, so each needs the owner's explicit approval.
+
+### Distinctions that are never collapsed
+
+- proposing a change ≠ executing it;
+- execution ≠ a passed check;
+- green CI ≠ an independent audit;
+- a saved artifact ≠ a proven update of the core;
+- an integration that exists ≠ proven autonomy;
+- approval ≠ evidence of execution.
+
+Copilot's independence means doing its provided tasks without a manual start of every action. It never means bypassing checks, unbounded authority or automatic merge.
 
 ## No automatic merge
 
@@ -91,7 +126,7 @@ Nothing in this stack merges automatically. No agent merges, enables auto-merge,
 
 ## Decided boundaries
 
-- **Role of the human in the core (`OQ-009`, owner, 2026-10-23 14:55 UTC).** The human is not a mandatory selector of the core's inner research and learning loop. Internal selection of a candidate, research acceptance of a hypothesis and authority to change the system are separate operations; authority is never inferred from `ACCEPTED`, a passing test or an internal selector's choice. Autonomous research is not autonomous change of the core: core mutations stay behind a controlled-commit boundary with the owner's approval, and there is no automatic merge. The decision is recorded and linked to requirements in `docs/theory/OPEN_QUESTIONS.md` (theory thread, branch `claude/project-thread-ofxc12`); this file does not restate its reasoning. It is an architectural decision, not evidence that it is implemented. In the development loop described here, the owner's merge gate applies either way.
+- **Role of the human in the core (`OQ-009`, owner, 2026-10-23 14:55 UTC).** The human is not a mandatory selector of the core's inner research and learning loop. Internal selection of a candidate, research acceptance of a hypothesis and authority to change the system are separate operations; authority is never inferred from `ACCEPTED`, a passing test or an internal selector's choice. Autonomous research is not autonomous change of the core: core mutations stay behind a controlled-commit boundary with the owner's approval, and there is no automatic merge. The decision is recorded and linked to requirements in `docs/theory/OPEN_QUESTIONS.md` (PR #37); this file does not restate its reasoning. It is an architectural decision, not evidence that it is implemented. In the development loop described here, the owner's merge gate applies either way.
 
 ## Open questions for the owner
 
