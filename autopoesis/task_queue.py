@@ -23,6 +23,16 @@ from .core import EvolutionError, canonical_json
 QUEUE_VERSION = 1
 QUEUE_STATUSES = {"OPEN", "SELECTED", "IN_PROGRESS", "DONE", "REJECTED"}
 QUEUE_HISTORY_EVENTS = {"CANDIDATE_ADDED", "STATUS_CHANGED", "VERIFICATION_RECORDED"}
+# Governed lifecycle. DONE and REJECTED are terminal. IN_PROGRESS -> OPEN is
+# the retry/interruption path; each entry into IN_PROGRESS counts an attempt.
+ALLOWED_TRANSITIONS = {
+    "OPEN": frozenset({"SELECTED", "REJECTED"}),
+    "SELECTED": frozenset({"IN_PROGRESS", "OPEN", "REJECTED"}),
+    "IN_PROGRESS": frozenset({"DONE", "OPEN", "REJECTED"}),
+    "DONE": frozenset(),
+    "REJECTED": frozenset(),
+}
+MAX_ATTEMPTS = 3
 
 
 def _write_queue_atomically(path: Path, queue: dict[str, Any]) -> None:
@@ -129,6 +139,12 @@ def _validate_history(history: list[Any]) -> None:
                 or any(char not in "0123456789abcdef" for char in artifact_hash)
             ):
                 raise EvolutionError(f"{prefix}: artifact_sha256 must be a lowercase SHA-256 hex digest")
+            if "source" in event and (not isinstance(event["source"], str) or not event["source"].strip()):
+                raise EvolutionError(f"{prefix}: source must be a non-empty string")
+            if "attempt" in event and (type(event["attempt"]) is not int or event["attempt"] < 1):
+                raise EvolutionError(f"{prefix}: attempt must be a positive integer")
+            if "revision" in event and not _is_digest(event["revision"]):
+                raise EvolutionError(f"{prefix}: revision must be a lowercase SHA-256 hex digest")
 
 
 def load_queue(path: Path) -> dict[str, Any]:
@@ -169,17 +185,57 @@ def load_queue(path: Path) -> dict[str, Any]:
         attempts = item.get("attempts", 0)
         if type(attempts) is not int or attempts < 0:
             raise EvolutionError(f"Invalid attempts count for queued task {item['id']}")
+        if attempts > MAX_ATTEMPTS:
+            raise EvolutionError(f"Queued task {item['id']} exceeds the attempt limit of {MAX_ATTEMPTS}")
     _validate_history(queue["history"])
 
     # The queue snapshot is the current state; its own audit trail must not
     # contradict that state. Histories may omit transitions for legacy items,
     # but when a transition exists, the final recorded destination must match
     # the persisted item status.
+    # Every recorded edge must also be one advance_task could have made, so a
+    # restored history cannot carry a completion that skipped the PASS gate.
+    sources = {item["id"]: item.get("source") for item in queue["items"]}
     latest_status: dict[str, str] = {}
+    replayed_attempts: dict[str, int] = {}
+    latest_verification: dict[str, str | None] = {}
     for event in queue["history"]:
+        task_id = event.get("task_id")
+        if event.get("event") == "VERIFICATION_RECORDED":
+            # record_verification only writes while the task is IN_PROGRESS, so evidence
+            # recorded in any other state (including after DONE or REJECTED) is forged.
+            if task_id in latest_status and latest_status[task_id] != "IN_PROGRESS":
+                raise EvolutionError(
+                    f"Queue history records verification for task {task_id!r} "
+                    f"outside IN_PROGRESS (state {latest_status[task_id]!r})"
+                )
+            # The code revision cannot be compared here, because the code may have moved on
+            # since completion, but a PASS without one could never have authorized DONE.
+            bound = (
+                event.get("source") is not None
+                and event.get("source") == sources.get(task_id)
+                and event.get("attempt") == replayed_attempts.get(task_id)
+                and _is_digest(event.get("revision"))
+            )
+            latest_verification[task_id] = event["verification_status"] if bound else None
+            continue
         if event.get("event") != "STATUS_CHANGED":
             continue
-        task_id = event["task_id"]
+        if event["to"] not in ALLOWED_TRANSITIONS.get(event["from"], frozenset()):
+            raise EvolutionError(
+                f"Queue history has an illegal transition for task {task_id!r}: {event['from']!r} -> {event['to']!r}"
+            )
+        if event["to"] == "IN_PROGRESS":
+            if replayed_attempts.get(task_id, 0) >= MAX_ATTEMPTS:
+                raise EvolutionError(
+                    f"Queue history starts task {task_id!r} beyond the attempt limit of {MAX_ATTEMPTS}"
+                )
+            replayed_attempts[task_id] = replayed_attempts.get(task_id, 0) + 1
+            latest_verification[task_id] = None
+        if event["to"] == "DONE" and latest_verification.get(task_id) != "PASS":
+            raise EvolutionError(
+                f"Queue history completes task {task_id!r} without a PASS for its source in that attempt"
+            )
         previous_destination = latest_status.get(task_id)
         if previous_destination is not None and event["from"] != previous_destination:
             raise EvolutionError(
@@ -190,6 +246,11 @@ def load_queue(path: Path) -> dict[str, Any]:
         latest_status[task_id] = event["to"]
     for item in queue["items"]:
         task_id = item["id"]
+        if task_id in latest_status and item.get("attempts", 0) != replayed_attempts.get(task_id, 0):
+            raise EvolutionError(
+                f"Queue attempts/history mismatch for task {task_id!r}: item says {item.get('attempts', 0)}, "
+                f"history has {replayed_attempts.get(task_id, 0)} IN_PROGRESS transitions"
+            )
         recorded_status = latest_status.get(task_id)
         if recorded_status is not None and recorded_status != item["status"]:
             raise EvolutionError(
@@ -241,8 +302,8 @@ def merge_candidates(queue: dict[str, Any], candidates: list[dict[str, Any]]) ->
     return {"queue": merged, "added": added, "total": len(merged["items"])}
 
 
-def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str = "") -> dict[str, Any]:
-    """Record a bounded lifecycle transition without executing the task."""
+def _apply_transition(queue: dict[str, Any], task_id: str, status: str, note: str = "") -> dict[str, Any]:
+    """Write one status change; private so that every caller goes through advance_task."""
     if not isinstance(task_id, str) or not task_id.strip():
         raise EvolutionError("Task id must be a non-empty string")
     if not isinstance(status, str) or status not in QUEUE_STATUSES:
@@ -275,14 +336,129 @@ def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str =
     return updated
 
 
+def _is_digest(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+
+def _has_passing_verification(queue: dict[str, Any], item: dict[str, Any], revision: str | None) -> bool:
+    """True when the latest verification since the last IN_PROGRESS is a PASS for this source, attempt and revision."""
+    source = item.get("source")
+    if not isinstance(source, str) or not source.strip() or not _is_digest(revision):
+        return False
+    latest = None
+    for event in queue.get("history", []):
+        if event.get("task_id") != item["id"]:
+            continue
+        if event.get("event") == "STATUS_CHANGED" and event.get("to") == "IN_PROGRESS":
+            latest = None
+        elif event.get("event") == "VERIFICATION_RECORDED":
+            bound = (
+                event.get("source") == source
+                and event.get("attempt") == item.get("attempts")
+                and event.get("revision") == revision
+            )
+            latest = event.get("verification_status") if bound else None
+    return latest == "PASS"
+
+
+def advance_task(
+    queue: dict[str, Any], task_id: str, status: str, note: str = "", *, revision: str | None = None
+) -> dict[str, Any]:
+    """Apply one governed lifecycle transition; repeating the current status is a no-op.
+
+    DONE needs ``revision``, the digest of the code as it is now; a PASS recorded
+    for other code does not count.
+    """
+    if not isinstance(status, str) or status not in QUEUE_STATUSES:
+        raise EvolutionError(f"Unsupported queue status: {status!r}")
+    matches = [item for item in queue.get("items", []) if item.get("id") == task_id]
+    if len(matches) != 1:
+        raise EvolutionError(f"Expected exactly one queued task with id {task_id!r}")
+    item = matches[0]
+    previous = item.get("status")
+    attempts = item.get("attempts", 0)
+    if type(attempts) is not int or attempts < 0:
+        raise EvolutionError(f"Invalid attempts count for queued task {task_id!r}")
+    if previous == status:
+        return {"queue": json.loads(canonical_json(queue)), "changed": False}
+    if status not in ALLOWED_TRANSITIONS.get(previous, frozenset()):
+        raise EvolutionError(f"Illegal transition for task {task_id!r}: {previous!r} -> {status!r}")
+    if status == "IN_PROGRESS" and attempts >= MAX_ATTEMPTS:
+        raise EvolutionError(f"Task {task_id!r} reached the attempt limit of {MAX_ATTEMPTS}; reject it instead")
+    if status == "DONE" and not _has_passing_verification(queue, item, revision):
+        raise EvolutionError(
+            f"Task {task_id!r} has no PASS verification of its own source at revision {revision!r} "
+            "since its latest IN_PROGRESS"
+        )
+    return {"queue": _apply_transition(queue, task_id, status, note), "changed": True}
+
+
+def select_next_task(queue: dict[str, Any]) -> dict[str, Any]:
+    """Deterministically choose one OPEN item and explain every deferral; never mutates."""
+    items = sorted(queue.get("items", []), key=lambda item: item["id"])
+    active = [item["id"] for item in items if item.get("status") in {"SELECTED", "IN_PROGRESS"}]
+    if active:
+        return {"selected": None, "reason": f"work already active: {', '.join(active)}", "deferred": []}
+    eligible: list[dict[str, Any]] = []
+    deferred: list[dict[str, str]] = []
+    for item in items:
+        if item.get("status") != "OPEN":
+            continue
+        if item.get("attempts", 0) >= MAX_ATTEMPTS:
+            deferred.append({"id": item["id"], "reason": "attempt limit reached"})
+        elif not all(isinstance(item.get(key), str) and item[key].strip() for key in ("source", "evidence")):
+            deferred.append({"id": item["id"], "reason": "insufficient evidence: needs source and evidence"})
+        elif type(item.get("priority", 0)) is not int:
+            # A malformed priority is not ranked as some other number; the item waits until it is fixed.
+            deferred.append({"id": item["id"], "reason": f"malformed priority {item['priority']!r}: needs an integer"})
+        else:
+            eligible.append(item)
+    if not eligible:
+        return {"selected": None, "reason": "no eligible OPEN candidates", "deferred": deferred}
+
+    def rank(item: dict[str, Any]) -> tuple[int, int, str]:
+        return (-item.get("priority", 0), item.get("attempts", 0), item["id"])
+
+    chosen = min(eligible, key=rank)
+    for item in eligible:
+        if item is not chosen:
+            deferred.append({"id": item["id"], "reason": f"ranked below {chosen['id']}"})
+    reason = (
+        f"highest priority {chosen.get('priority', 0)}, fewest attempts {chosen.get('attempts', 0)}, "
+        f"then lowest id among {len(eligible)} eligible"
+    )
+    return {"selected": chosen["id"], "reason": reason, "deferred": sorted(deferred, key=lambda d: d["id"])}
+
+
+def select_next_task_file(path: Path) -> dict[str, Any]:
+    """Select the next task and persist OPEN -> SELECTED; no eligible work leaves the file untouched."""
+    with queue_write_lock(path):
+        queue = load_queue(path)
+        selection = select_next_task(queue)
+        if selection["selected"] is not None:
+            result = advance_task(queue, selection["selected"], "SELECTED", f"selected: {selection['reason']}")
+            _write_queue_atomically(path, result["queue"])
+    return {**selection, "path": path.as_posix()}
+
+
 def record_verification_file(
     path: Path,
     task_id: str,
     verification_status: str,
     verification_level: str,
     artifact_sha256: str | None = None,
+    source: str | None = None,
+    attempt: int | None = None,
+    revision: str | None = None,
 ) -> dict[str, Any]:
-    """Persist a verification result as evidence without changing task lifecycle status."""
+    """Persist verification evidence.
+
+    Evidence for a queued item must name that item's source and the attempt
+    number captured before verification started; it is refused unless that
+    exact attempt is still IN_PROGRESS, so a late result cannot count for a retry.
+    ``revision`` is the digest of the code that was tested; DONE compares it
+    with the code as it is when the task completes.
+    """
     if not isinstance(task_id, str) or not task_id.strip():
         raise EvolutionError("Verification task_id must be a non-empty string")
     if not isinstance(verification_status, str) or verification_status not in {"PASS", "FAIL"}:
@@ -295,9 +471,29 @@ def record_verification_file(
         or any(char not in "0123456789abcdef" for char in artifact_sha256)
     ):
         raise EvolutionError("artifact_sha256 must be a lowercase SHA-256 hex digest")
+    if source is not None and (not isinstance(source, str) or not source.strip()):
+        raise EvolutionError("Verification source must be a non-empty string")
+    if revision is not None and not _is_digest(revision):
+        raise EvolutionError("Verification revision must be a lowercase SHA-256 hex digest")
+    if attempt is not None and (type(attempt) is not int or attempt < 1):
+        raise EvolutionError("Verification attempt must be a positive integer")
 
     with queue_write_lock(path):
         queue = load_queue(path)
+        item = next((entry for entry in queue["items"] if entry["id"] == task_id), None)
+        if item is not None:
+            expected = item.get("source")
+            if not isinstance(expected, str) or not expected.strip():
+                raise EvolutionError(f"Queued task {task_id!r} has no source to bind verification to")
+            if source != expected:
+                raise EvolutionError(
+                    f"Verification source {source!r} does not match queued task {task_id!r} source {expected!r}"
+                )
+            if item.get("status") != "IN_PROGRESS" or attempt != item.get("attempts"):
+                raise EvolutionError(
+                    f"Verification for attempt {attempt!r} of task {task_id!r} is stale: the task is "
+                    f"{item.get('status')} in attempt {item.get('attempts')}"
+                )
         event = {
             "event": "VERIFICATION_RECORDED",
             "task_id": task_id,
@@ -306,10 +502,28 @@ def record_verification_file(
             "artifact_sha256": artifact_sha256,
             "at": datetime.now(timezone.utc).isoformat(),
         }
+        if source is not None:
+            event["source"] = source
+        if item is not None:
+            event["attempt"] = attempt
+            if revision is not None:
+                event["revision"] = revision
         updated = json.loads(canonical_json(queue))
         updated["history"].append(event)
         _write_queue_atomically(path, updated)
     return {"task_id": task_id, "verification_status": verification_status, "path": path.as_posix()}
+
+
+def current_attempt(path: Path, task_id: str) -> int | None:
+    """The attempt number of an IN_PROGRESS queued task, captured before starting its verification.
+
+    None when the task is absent or not IN_PROGRESS; record_verification_file then refuses the evidence.
+    """
+    queue = load_queue(path)
+    item = next((entry for entry in queue["items"] if entry["id"] == task_id), None)
+    if item is None or item.get("status") != "IN_PROGRESS":
+        return None
+    return item["attempts"]
 
 
 def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str, Any]:
@@ -321,10 +535,12 @@ def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str,
     return {"added": result["added"], "total": result["total"], "path": path.as_posix()}
 
 
-def record_outcome_file(path: Path, task_id: str, status: str, note: str = "") -> dict[str, Any]:
-    """Persist a status transition and its audit event to the queue file."""
+def advance_task_file(
+    path: Path, task_id: str, status: str, note: str = "", *, revision: str | None = None
+) -> dict[str, Any]:
+    """Persist a governed lifecycle transition; a no-op leaves the file untouched."""
     with queue_write_lock(path):
-        queue = load_queue(path)
-        updated = record_outcome(queue, task_id, status, note)
-        _write_queue_atomically(path, updated)
-    return {"task_id": task_id, "status": status, "path": path.as_posix()}
+        result = advance_task(load_queue(path), task_id, status, note, revision=revision)
+        if result["changed"]:
+            _write_queue_atomically(path, result["queue"])
+    return {"task_id": task_id, "status": status, "changed": result["changed"], "path": path.as_posix()}
