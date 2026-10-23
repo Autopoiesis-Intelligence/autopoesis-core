@@ -57,9 +57,17 @@ class TaskSelectionTests(unittest.TestCase):
         queue = advance_task(queue, "B", "OPEN")["queue"]
         self.assertEqual(select_next_task(queue)["selected"], "C")
 
-    def test_non_integer_priority_counts_as_zero(self):
-        queue = queue_of(candidate("A"), candidate("B", priority="9"), candidate("C", priority=True))
-        self.assertEqual(select_next_task(queue)["selected"], "A")
+    def test_malformed_priority_is_deferred_not_ranked(self):
+        queue = queue_of(candidate("A", priority=1), candidate("B", priority="100"), candidate("C", priority=True),
+                         candidate("D", priority=2.5))
+        selection = select_next_task(queue)
+        self.assertEqual(selection["selected"], "A")
+        self.assertIn("highest priority 1", selection["reason"])
+        reasons = {entry["id"]: entry["reason"] for entry in selection["deferred"]}
+        for task_id in ("B", "C", "D"):
+            self.assertIn("malformed priority", reasons[task_id])
+        only_malformed = select_next_task(queue_of(candidate("B", priority="100")))
+        self.assertIsNone(only_malformed["selected"])
 
     def test_insufficient_evidence_and_attempt_limit_are_deferred_with_reasons(self):
         queue = queue_of({"id": "NOEVIDENCE", "type": "proposal", "source": "x.py"}, candidate("TIRED"))

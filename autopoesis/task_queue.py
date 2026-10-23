@@ -387,14 +387,16 @@ def select_next_task(queue: dict[str, Any]) -> dict[str, Any]:
             deferred.append({"id": item["id"], "reason": "attempt limit reached"})
         elif not all(isinstance(item.get(key), str) and item[key].strip() for key in ("source", "evidence")):
             deferred.append({"id": item["id"], "reason": "insufficient evidence: needs source and evidence"})
+        elif type(item.get("priority", 0)) is not int:
+            # A malformed priority is not ranked as some other number; the item waits until it is fixed.
+            deferred.append({"id": item["id"], "reason": f"malformed priority {item['priority']!r}: needs an integer"})
         else:
             eligible.append(item)
     if not eligible:
         return {"selected": None, "reason": "no eligible OPEN candidates", "deferred": deferred}
 
     def rank(item: dict[str, Any]) -> tuple[int, int, str]:
-        priority = item.get("priority", 0)
-        return (-(priority if type(priority) is int else 0), item.get("attempts", 0), item["id"])
+        return (-item.get("priority", 0), item.get("attempts", 0), item["id"])
 
     chosen = min(eligible, key=rank)
     for item in eligible:
