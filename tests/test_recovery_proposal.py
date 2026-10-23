@@ -82,6 +82,15 @@ class RecoveryProposalTests(unittest.TestCase):
                     evidence["artifacts"][0]["snapshot_size_bytes"] = observed_size
                 self.assertEqual(build_recovery_proposal(evidence)["status"], "BLOCKED")
 
+    def test_evaluator_identity_matches_ci_workflow(self):
+        from pathlib import Path
+        from autopoesis.recovery_proposal import ARTIFACT_NAME, WORKFLOW_PATH
+
+        workflow = Path(WORKFLOW_PATH)
+        self.assertTrue(workflow.is_file())
+        workflow_text = workflow.read_text(encoding="utf-8")
+        self.assertIn(f"name: {ARTIFACT_NAME}", workflow_text)
+
     def test_wrong_workflow_path_blocks(self):
         evidence = valid_evidence()
         evidence["runs"][0]["path"] = ".github/workflows/autopoiesis-cycle.yml@refs/heads/main"
