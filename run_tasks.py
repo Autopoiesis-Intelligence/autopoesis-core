@@ -10,8 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
-from autopoesis.task_queue import record_outcome_file, record_verification_file, update_queue_file
-from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, verify_test_patch_in_sandbox
+from autopoesis.task_queue import advance_task_file, current_attempt, record_verification_file, update_queue_file
+from autopoesis.executor import (
+    apply_patch_to_sandbox,
+    prepare_patch_artifact,
+    source_tree_digest,
+    verify_test_patch_in_sandbox,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -137,10 +142,17 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         note = task.get("note", "")
         if not isinstance(target_id, str) or not isinstance(status, str) or not isinstance(note, str):
             raise ValueError("update_task_status requires string task_id, status, and optional note")
-        result = record_outcome_file(queue_path, target_id, status, note)
+        # DONE is checked against the code as it is now, never a revision named by task data.
+        revision = source_tree_digest(ROOT / "autopoesis") if status == "DONE" else None
+        result = advance_task_file(queue_path, target_id, status, note, revision=revision)
     elif task_type == "prepare_test_patch":
         result = prepare_patch_artifact(task, ROOT)
     elif task_type == "verify_test_patch_sandbox":
+        evidence_id = task.get("queue_task_id", task_id)
+        if not isinstance(evidence_id, str) or not evidence_id.strip():
+            raise ValueError("queue_task_id must be a non-empty string")
+        # Capture the attempt before running, so a result that returns after a retry is refused.
+        attempt = current_attempt(queue_path, evidence_id)
         result = verify_test_patch_in_sandbox(task, ROOT)
     elif task_type == "apply_test_patch_sandbox":
         artifact = prepare_patch_artifact(task, ROOT)
@@ -157,10 +169,13 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
     if task_type == "verify_test_patch_sandbox" and result.get("verification_status") in {"PASS", "FAIL"}:
         record_verification_file(
             queue_path,
-            task_id,
+            evidence_id,
             result["verification_status"],
             "GENERATED_TEST_EXECUTION",
             result.get("artifact_sha256"),
+            task.get("source"),
+            attempt,
+            result.get("source_tree_sha256"),
         )
 
     task_status = "FAIL" if result.get("verification_status") == "FAIL" else "PASS"
