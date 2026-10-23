@@ -28,24 +28,34 @@ class ScheduledStateSelectionTests(unittest.TestCase):
         )
         self.assertEqual(selected["id"], 101)
 
+    def test_newer_failed_cycle_refuses_rollback_to_older_snapshot(self):
+        pages = [{"workflow_runs": [
+            run(10, 10, conclusion="success"),
+            run(11, 11, conclusion="failure"),
+        ]}]
+        with self.assertRaisesRegex(ValueError, "Refusing to restore an older snapshot"):
+            select_prior_successful_run(pages, current_run_id=12, bootstrap=False)
+
+    def test_newer_cancelled_cycle_refuses_rollback(self):
+        pages = [{"workflow_runs": [
+            run(10, 10, conclusion="success"),
+            run(11, 11, conclusion="cancelled"),
+        ]}]
+        with self.assertRaisesRegex(ValueError, "newest cycle run 11"):
+            select_prior_successful_run(pages, current_run_id=12, bootstrap=False)
+
     def test_rerun_attempt_is_never_selected_as_persisted_state(self):
-        pages = [{
-            "workflow_runs": [
-                run(10, 10, conclusion="success"),
-                {**run(11, 11, conclusion="success"), "run_attempt": 2},
-            ]
-        }]
-        selected = select_prior_successful_run(
-            pages, current_run_id=12, bootstrap=False
-        )
-        self.assertEqual(selected["id"], 10)
+        pages = [{"workflow_runs": [
+            run(10, 10, conclusion="success"),
+            {**run(11, 11, conclusion="success"), "run_attempt": 2},
+        ]}]
+        with self.assertRaisesRegex(ValueError, "run_attempt=2"):
+            select_prior_successful_run(pages, current_run_id=12, bootstrap=False)
 
     def test_bootstrap_does_not_treat_rerun_as_successful_history(self):
-        pages = [{
-            "workflow_runs": [
-                {**run(11, 11, conclusion="success"), "run_attempt": 2},
-            ]
-        }]
+        pages = [{"workflow_runs": [
+            {**run(11, 11, conclusion="success"), "run_attempt": 2},
+        ]}]
         self.assertIsNone(
             select_prior_successful_run(pages, current_run_id=12, bootstrap=True)
         )
