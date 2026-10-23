@@ -29,20 +29,25 @@ class ScheduledWorkflowContractTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", self.source)
         self.assertIn("timeout-minutes: 20", self.source)
 
-    def test_disable_guard_gates_the_only_job_for_every_trigger(self):
-        # A job-level if skips every step, so it holds for schedule and manual dispatch,
-        # bootstrap included. A second job or a guard moved to a step would bypass it.
+    def test_disable_guard_fails_run_before_any_cycle_work(self):
+        # A fully skipped workflow can still be reported successful by GitHub.
+        # The emergency guard must fail the job before checkout/state selection,
+        # so that run cannot be mistaken for a successful persisted cycle.
         lines = self.source.splitlines()
         jobs_at = lines.index("jobs:")
         job_names = [line for line in lines[jobs_at + 1:]
                      if line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":")]
         self.assertEqual(job_names, ["  cycle:"])
         job_if = lines[lines.index("  cycle:") + 1]
-        self.assertTrue(job_if.startswith("    if: ${{ "), job_if)
-        for guard in ("github.repository == 'Autopoiesis-Intelligence/autopoiesis-core'",
-                      "github.ref == 'refs/heads/main'",
-                      "vars.AUTOPOIESIS_CYCLE_DISABLED != 'true'"):
-            self.assertIn(guard, job_if)
+        self.assertIn("github.repository == 'Autopoiesis-Intelligence/autopoiesis-core'", job_if)
+        self.assertIn("github.ref == 'refs/heads/main'", job_if)
+        self.assertNotIn("AUTOPOIESIS_CYCLE_DISABLED", job_if)
+        guard_at = lines.index("      - name: Enforce emergency stop")
+        checkout_at = lines.index("      - uses: actions/checkout@v4")
+        self.assertLess(guard_at, checkout_at)
+        guard = "\\n".join(lines[guard_at:checkout_at])
+        self.assertIn("if: ${{ vars.AUTOPOIESIS_CYCLE_DISABLED == 'true' }}", guard)
+        self.assertIn("exit 1", guard)
         self.assertNotIn("||", job_if)
 
     def test_restore_is_provenance_bound_and_fail_closed(self):
