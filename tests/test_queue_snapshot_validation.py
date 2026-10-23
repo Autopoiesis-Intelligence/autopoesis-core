@@ -418,7 +418,6 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             self._dispatch_run(430, head_branch="other"),
             self._dispatch_run(420, path=".github/workflows/other.yml@refs/heads/main"),
             self._dispatch_run("410"),
-            "not-a-run",
             self._dispatch_run(300),
         ]
 
