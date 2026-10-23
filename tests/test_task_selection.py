@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,7 +14,16 @@ from autopoesis.task_queue import (
     select_next_task_file,
     update_queue_file,
 )
+from autopoesis.core import EvolutionError
 from run_tasks import run
+
+
+def _select(path_text, start, results):
+    start.wait()
+    try:
+        results.put(("selected", select_next_task_file(Path(path_text))["selected"]))
+    except EvolutionError as exc:
+        results.put(("rejected", str(exc)))
 
 
 def candidate(task_id, **extra):
@@ -99,6 +109,29 @@ class TaskSelectionTests(unittest.TestCase):
             result = json.loads(results_path.read_text(encoding="utf-8"))["tasks"][0]["result"]
             self.assertEqual(result["selected"], "A")
             self.assertEqual(load_queue(queue_path)["items"][0]["status"], "SELECTED")
+
+
+    def test_concurrent_selectors_never_select_two_items(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [candidate("A"), candidate("B"), candidate("C")])
+            context = multiprocessing.get_context("fork")
+            start, results = context.Event(), context.Queue()
+            processes = [context.Process(target=_select, args=(str(path), start, results)) for _ in range(8)]
+            for process in processes:
+                process.start()
+            start.set()
+            outcomes = [results.get(timeout=30) for _ in processes]
+            for process in processes:
+                process.join(timeout=30)
+                self.assertEqual(process.exitcode, 0)
+            winners = [value for kind, value in outcomes if kind == "selected" and value is not None]
+            self.assertEqual(winners, ["A"])
+            for kind, value in outcomes:
+                if kind == "rejected":
+                    self.assertIn("locked", value)
+            statuses = {item["id"]: item["status"] for item in load_queue(path)["items"]}
+            self.assertEqual(statuses, {"A": "SELECTED", "B": "OPEN", "C": "OPEN"})
 
 
 if __name__ == "__main__":
