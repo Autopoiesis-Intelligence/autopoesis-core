@@ -182,7 +182,9 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             snapshot, _manifest_path, _expected, _manifest = self._write_bound_snapshot(root)
-            destination = root / "TASK_QUEUE.json"
+            install_dir = root / "installed"
+            install_dir.mkdir()
+            destination = install_dir / "TASK_QUEUE.json"
             original = b'{"version": 1, "items": [], "history": []}\n'
             destination.write_bytes(original)
             expected_queue = load_queue(snapshot)
@@ -201,7 +203,9 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             snapshot, _manifest_path, _expected, _manifest = self._write_bound_snapshot(root)
-            destination = root / "TASK_QUEUE.json"
+            install_dir = root / "installed"
+            install_dir.mkdir()
+            destination = install_dir / "TASK_QUEUE.json"
             original = b'original queue bytes must survive\n'
             destination.write_bytes(original)
 
@@ -213,7 +217,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
                     )
 
             self.assertEqual(destination.read_bytes(), original)
-            self.assertEqual(list(root.glob(".TASK_QUEUE.json.restore-*.tmp")), [])
+            self.assertEqual(list(install_dir.glob(".TASK_QUEUE.json.restore-*.tmp")), [])
 
     def test_snapshot_manifest_round_trip_binds_queue_to_source(self):
         with tempfile.TemporaryDirectory() as directory:
