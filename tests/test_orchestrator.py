@@ -76,6 +76,14 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(self.events("VERIFICATION_RECORDED")[0]["verification_level"],
                          "GENERATED_TEST_EXECUTION")
 
+    def test_budget_that_could_outlive_the_lease_is_refused_before_any_write(self):
+        update_queue_file(self.path, [task()])
+        before = self.path.read_bytes()
+        for budget in (LEASE_TTL.total_seconds(), LEASE_TTL.total_seconds() - 1, 0):
+            with self.subTest(budget=budget), self.assertRaisesRegex(ValueError, "lease TTL"):
+                run_cycle(self.path, "runner", ROOT, handlers={"verify_test_scaffold": passing}, budget_seconds=budget)
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_empty_queue_and_disable_switch_write_nothing(self):
         update_queue_file(self.path, [task(task_type="proposal")])
         before = self.path.read_bytes()

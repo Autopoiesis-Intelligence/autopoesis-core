@@ -18,6 +18,7 @@ from typing import Any
 from .core import EvolutionError
 from .executor import source_tree_digest, verify_test_patch_in_sandbox
 from .task_queue import (
+    LEASE_TTL,
     MAX_ATTEMPTS,
     advance_task_file,
     current_attempt,
@@ -118,9 +119,16 @@ def run_cycle(
     waits at most LOCK_RETRIES * LOCK_RETRY_SECONDS for the lock and then refuses. Not covered
     by either bound: queue reads and writes in this process once a lock is held, and the
     post-PASS source_tree_digest of the checkout. The whole cycle has no single wall-time limit.
+    The budget plus five lock waits must stay under LEASE_TTL, since the runner never renews
+    its lease; a larger budget is refused before any write.
     A handler that does not finish within the budget gets no verification and no DONE. The
     result size cap limits what is accepted, not the child's memory use while it builds the result.
     """
+    # The runner does not renew its lease, so the whole locked part of the cycle must fit inside it.
+    if not (0 < budget_seconds and budget_seconds + 5 * LOCK_RETRIES * LOCK_RETRY_SECONDS < LEASE_TTL.total_seconds()):
+        raise ValueError(
+            f"budget_seconds must leave the cycle inside the {LEASE_TTL.total_seconds():.0f}s lease TTL"
+        )
     handlers = HANDLERS if handlers is None else handlers
     if disable_path is not None and disable_path.exists():
         return {"status": "DISABLED", "reason": f"disable switch present at {disable_path.as_posix()}"}
