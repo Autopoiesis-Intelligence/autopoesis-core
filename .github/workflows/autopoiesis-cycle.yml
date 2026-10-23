@@ -21,10 +21,18 @@ concurrency:
 
 jobs:
   cycle:
-    if: ${{ github.repository == 'Autopoiesis-Intelligence/autopoiesis-core' && github.ref == 'refs/heads/main' && vars.AUTOPOIESIS_CYCLE_DISABLED != 'true' }}
+    if: ${{ github.repository == 'Autopoiesis-Intelligence/autopoiesis-core' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # A failed guard, rather than a fully skipped workflow, keeps disabled runs
+      # out of the successful-run history used to select the next persisted snapshot.
+      - name: Enforce emergency stop
+        if: ${{ vars.AUTOPOIESIS_CYCLE_DISABLED == 'true' }}
+        run: |
+          echo "Autopoiesis cycle disabled by AUTOPOIESIS_CYCLE_DISABLED=true; refusing run." >&2
+          exit 1
+
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
