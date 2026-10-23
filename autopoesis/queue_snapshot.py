@@ -174,6 +174,21 @@ def bind_source_artifact(
     artifacts = artifacts_payload.get("artifacts")
     if not isinstance(artifacts, list):
         raise ValueError("Source artifacts response must contain an artifacts array")
+    evidence = artifacts_payload.get("pagination_evidence")
+    if not isinstance(evidence, dict) or evidence.get("complete") is not True:
+        raise ValueError("Source artifact list lacks complete observed pagination evidence")
+    pages = evidence.get("pages")
+    page_count = evidence.get("page_count")
+    if type(page_count) is not int or not isinstance(pages, list) or page_count != len(pages):
+        raise ValueError("Source artifact pagination evidence has an invalid page count")
+    from .github_pagination import validate_paginated_collection
+    captured_artifacts = validate_paginated_collection(
+        pages,
+        collection_key="artifacts",
+        expected_page_size=100,
+    )
+    if captured_artifacts != artifacts:
+        raise ValueError("Source artifacts differ from captured pagination evidence")
 
     expected_id = _run_id_text(requested_run_id)
     matches = [
