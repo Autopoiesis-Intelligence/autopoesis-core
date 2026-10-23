@@ -3,12 +3,14 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from autopoesis.core import EvolutionError
 from autopoesis.queue_snapshot import (
     bind_source_artifact,
     create_queue_snapshot_manifest,
+    install_validated_queue_snapshot,
     latest_source_run_id,
     require_latest_source_run,
     validate_queue_snapshot,
@@ -175,6 +177,42 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         manifest = create_queue_snapshot_manifest(snapshot, **expected)
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         return snapshot, manifest_path, expected, manifest
+
+    def test_atomic_install_replaces_destination_only_after_staged_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot, _manifest_path, _expected, _manifest = self._write_bound_snapshot(root)
+            destination = root / "TASK_QUEUE.json"
+            original = b'{"version": 1, "items": [], "history": []}\n'
+            destination.write_bytes(original)
+            expected_queue = load_queue(snapshot)
+
+            result = install_validated_queue_snapshot(
+                snapshot, destination, expected_queue=expected_queue
+            )
+
+            self.assertEqual(load_queue(destination), expected_queue)
+            self.assertEqual(result["queue"], expected_queue)
+            self.assertEqual(result["size_bytes"], snapshot.stat().st_size)
+            self.assertNotEqual(destination.read_bytes(), original)
+            self.assertEqual(list(root.glob(".TASK_QUEUE.json.restore-*.tmp")), [])
+
+    def test_atomic_install_preserves_existing_destination_if_staging_validation_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot, _manifest_path, _expected, _manifest = self._write_bound_snapshot(root)
+            destination = root / "TASK_QUEUE.json"
+            original = b'original queue bytes must survive\n'
+            destination.write_bytes(original)
+
+            with patch("autopoesis.queue_snapshot.load_queue", side_effect=ValueError("injected staged validation failure")):
+                with self.assertRaisesRegex(ValueError, "injected staged validation failure"):
+                    install_validated_queue_snapshot(
+                        snapshot, destination, expected_queue=load_queue(snapshot)
+                    )
+
+            self.assertEqual(destination.read_bytes(), original)
+            self.assertEqual(list(root.glob(".TASK_QUEUE.json.restore-*.tmp")), [])
 
     def test_snapshot_manifest_round_trip_binds_queue_to_source(self):
         with tempfile.TemporaryDirectory() as directory:
