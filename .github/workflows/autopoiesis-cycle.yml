@@ -53,7 +53,7 @@ jobs:
               raise SystemExit(str(exc)) from exc
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               if prior:
-                  run = prior[0]
+                  run = prior
                   if not isinstance(run.get("head_sha"), str) or not re.fullmatch(r"[0-9a-f]{40}", run["head_sha"]):
                       raise SystemExit("Refusing: source run has no valid lowercase SHA-1 head SHA")
                   f.write(f"source_run_id={run['id']}\n")
