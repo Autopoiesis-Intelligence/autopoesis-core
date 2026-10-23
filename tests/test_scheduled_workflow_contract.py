@@ -46,7 +46,7 @@ class ScheduledWorkflowContractTests(unittest.TestCase):
         guard_at = lines.index("      - name: Enforce emergency stop")
         checkout_at = lines.index("      - uses: actions/checkout@v4")
         self.assertLess(guard_at, checkout_at)
-        guard = "\\n".join(lines[guard_at:checkout_at])
+        guard = "\n".join(lines[guard_at:checkout_at])
         self.assertIn("if: ${{ vars.AUTOPOIESIS_CYCLE_DISABLED == 'true' }}", guard)
         self.assertIn("exit 1", guard)
         self.assertNotIn("||", job_if)
