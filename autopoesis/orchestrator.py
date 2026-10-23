@@ -191,7 +191,7 @@ def main() -> int:
     result = run_cycle(args.queue, args.owner, args.root.resolve(), disable_path=args.disable_file,
                        budget_seconds=args.budget_seconds)
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 1 if result["status"] == "REFUSED" else 0
+    return 0 if result["status"] in {"COMPLETED", "NO_WORK"} else 1
 
 
 if __name__ == "__main__":
