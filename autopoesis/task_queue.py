@@ -185,6 +185,8 @@ def load_queue(path: Path) -> dict[str, Any]:
         attempts = item.get("attempts", 0)
         if type(attempts) is not int or attempts < 0:
             raise EvolutionError(f"Invalid attempts count for queued task {item['id']}")
+        if attempts > MAX_ATTEMPTS:
+            raise EvolutionError(f"Queued task {item['id']} exceeds the attempt limit of {MAX_ATTEMPTS}")
     _validate_history(queue["history"])
 
     # The queue snapshot is the current state; its own audit trail must not
@@ -217,6 +219,10 @@ def load_queue(path: Path) -> dict[str, Any]:
                 f"Queue history has an illegal transition for task {task_id!r}: {event['from']!r} -> {event['to']!r}"
             )
         if event["to"] == "IN_PROGRESS":
+            if replayed_attempts.get(task_id, 0) >= MAX_ATTEMPTS:
+                raise EvolutionError(
+                    f"Queue history starts task {task_id!r} beyond the attempt limit of {MAX_ATTEMPTS}"
+                )
             replayed_attempts[task_id] = replayed_attempts.get(task_id, 0) + 1
             latest_verification[task_id] = None
         if event["to"] == "DONE" and latest_verification.get(task_id) != "PASS":
