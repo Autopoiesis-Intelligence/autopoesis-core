@@ -166,32 +166,55 @@ class QueueHistoryValidationTests(unittest.TestCase):
             return {"event": "STATUS_CHANGED", "task_id": "TASK-1", "from": start, "to": end,
                     "note": "", "at": f"2026-01-01T00:00:0{second}+00:00"}
 
-        def verification(status, attempt, source="tests/example.py"):
-            return {"event": "VERIFICATION_RECORDED", "task_id": "TASK-1", "verification_status": status,
-                    "verification_level": "unit", "artifact_sha256": None, "source": source,
-                    "attempt": attempt, "at": "2026-01-01T00:00:03+00:00"}
+        def verification(status, attempt, source="tests/example.py", revision="a" * 64):
+            event = {"event": "VERIFICATION_RECORDED", "task_id": "TASK-1", "verification_status": status,
+                     "verification_level": "unit", "artifact_sha256": None, "source": source,
+                     "attempt": attempt, "at": "2026-01-01T00:00:03+00:00"}
+            if revision is not None:
+                event["revision"] = revision
+            return event
+
+        def write(events):
+            path = self._write_queue(events)
+            queue = json.loads(path.read_text(encoding="utf-8"))
+            attempts = sum(1 for e in events if e["event"] == "STATUS_CHANGED" and e["to"] == "IN_PROGRESS")
+            queue["items"][0].update({"source": "tests/example.py", "attempts": attempts})
+            path.write_text(json.dumps(queue), encoding="utf-8")
+            return path
 
         walk = [edge("OPEN", "SELECTED", 1), edge("SELECTED", "IN_PROGRESS", 2)]
         cases = {
             "no evidence": walk,
             "FAIL": walk + [verification("FAIL", 1)],
             "other source": walk + [verification("PASS", 1, source="other.py")],
+            "no revision": walk + [verification("PASS", 1, revision=None)],
             "earlier attempt": walk + [verification("PASS", 1), edge("IN_PROGRESS", "OPEN", 3),
                                        edge("OPEN", "SELECTED", 3), edge("SELECTED", "IN_PROGRESS", 3)],
         }
         for label, events in cases.items():
             with self.subTest(label):
-                path = self._write_queue(events + [edge("IN_PROGRESS", "DONE", 4)])
-                queue = json.loads(path.read_text(encoding="utf-8"))
-                queue["items"][0].update({"source": "tests/example.py", "attempts": 1})
-                path.write_text(json.dumps(queue), encoding="utf-8")
                 with self.assertRaisesRegex(EvolutionError, "without a PASS"):
-                    load_queue(path)
-        path = self._write_queue(walk + [verification("PASS", 1), edge("IN_PROGRESS", "DONE", 4)])
-        queue = json.loads(path.read_text(encoding="utf-8"))
-        queue["items"][0].update({"source": "tests/example.py", "attempts": 1})
-        path.write_text(json.dumps(queue), encoding="utf-8")
+                    load_queue(write(events + [edge("IN_PROGRESS", "DONE", 4)]))
+        path = write(walk + [verification("PASS", 1), edge("IN_PROGRESS", "DONE", 4)])
         self.assertEqual(load_queue(path)["items"][0]["status"], "DONE")
+
+    def test_rejects_attempt_counter_that_contradicts_history(self):
+        events = []
+        for cycle in range(3):
+            for start, end in (("OPEN", "SELECTED"), ("SELECTED", "IN_PROGRESS"), ("IN_PROGRESS", "OPEN")):
+                events.append({"event": "STATUS_CHANGED", "task_id": "TASK-1", "from": start, "to": end,
+                               "note": "", "at": f"2026-01-01T00:00:0{cycle}+00:00"})
+        path = self._write_queue(events)
+        queue = json.loads(path.read_text(encoding="utf-8"))
+        for attempts in (0, 2, 4):
+            with self.subTest(attempts=attempts):
+                queue["items"][0].update({"status": "OPEN", "attempts": attempts})
+                path.write_text(json.dumps(queue), encoding="utf-8")
+                with self.assertRaisesRegex(EvolutionError, "attempts/history mismatch"):
+                    load_queue(path)
+        queue["items"][0]["attempts"] = 3
+        path.write_text(json.dumps(queue), encoding="utf-8")
+        self.assertEqual(load_queue(path)["items"][0]["attempts"], 3)
 
     def test_rejects_non_string_transition_note(self):
         with self.assertRaisesRegex(EvolutionError, "note must be a string"):
