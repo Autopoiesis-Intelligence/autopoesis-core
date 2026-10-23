@@ -233,6 +233,25 @@ class TaskLeaseTests(unittest.TestCase):
         self.assertEqual(output[0]["result"]["lease"]["owner"], "runner")
         self.assertEqual(output[1]["result"]["recovered"], [])
 
+    def test_runner_exposes_lease_renewal_for_an_external_supervisor(self):
+        tasks = self.path.with_name("TASKS.json")
+        results = self.path.with_name("RESULTS.json")
+        tasks.write_text(json.dumps({"tasks": [
+            {"id": "pick", "type": "select_next_task", "owner": "runner"},
+        ]}), encoding="utf-8")
+        self.assertEqual(run(tasks, results, self.path), 0)
+        token = item(self.path)["lease"]["token"]
+        original_expiry = item(self.path)["lease"]["expires_at"]
+
+        tasks.write_text(json.dumps({"tasks": [
+            {"id": "renew", "type": "renew_lease", "queue_task_id": "TASK-1", "lease_token": token},
+        ]}), encoding="utf-8")
+        self.assertEqual(run(tasks, results, self.path), 0)
+        output = json.loads(results.read_text(encoding="utf-8"))["tasks"][0]
+        self.assertEqual(output["result"]["lease"]["token"], token)
+        self.assertGreater(output["result"]["lease"]["expires_at"], original_expiry)
+
+
 
 if __name__ == "__main__":
     unittest.main()
