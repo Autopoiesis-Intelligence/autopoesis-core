@@ -21,10 +21,12 @@ from autopoesis.task_queue import (
     record_verification_file,
     update_queue_file,
 )
+from autopoesis.executor import source_tree_digest
 from run_tasks import run
 
 
 SOURCE = "autopoesis/task_queue.py"
+REVISION = "a" * 64
 
 
 def fresh_queue():
@@ -33,11 +35,11 @@ def fresh_queue():
 
 def advance(queue, *statuses):
     for status in statuses:
-        queue = advance_task(queue, "TASK-1", status)["queue"]
+        queue = advance_task(queue, "TASK-1", status, revision=REVISION)["queue"]
     return queue
 
 
-def with_verification(queue, status, source=SOURCE):
+def with_verification(queue, status, source=SOURCE, revision=REVISION):
     queue = json.loads(json.dumps(queue))
     queue["history"].append({
         "event": "VERIFICATION_RECORDED",
@@ -47,6 +49,7 @@ def with_verification(queue, status, source=SOURCE):
         "artifact_sha256": None,
         "source": source,
         "attempt": next(i for i in queue["items"] if i["id"] == "TASK-1")["attempts"],
+        "revision": revision,
         "at": "2999-01-01T00:00:00+00:00",
     })
     return queue
@@ -190,6 +193,62 @@ class TaskLifecycleTests(unittest.TestCase):
             self.assertFalse([e for e in queue["history"] if e["event"] == "VERIFICATION_RECORDED"])
             with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
                 advance_task_file(queue_path, "TASK-1", "DONE")
+
+    def test_pass_for_other_code_does_not_complete_the_task(self):
+        in_progress = advance(fresh_queue(), "SELECTED", "IN_PROGRESS")
+        verified = with_verification(in_progress, "PASS", revision="b" * 64)
+        for revision in (REVISION, None, "not-a-digest"):
+            with self.subTest(revision=revision):
+                with self.assertRaisesRegex(EvolutionError, "no PASS verification"):
+                    advance_task(verified, "TASK-1", "DONE", revision=revision)
+        done = advance_task(verified, "TASK-1", "DONE", revision="b" * 64)["queue"]
+        self.assertEqual(done["items"][0]["status"], "DONE")
+
+    def test_runner_refuses_done_after_the_code_changed_since_verification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            queue_path, tasks_path, results_path = (
+                root / "TASK_QUEUE.json", root / "TASKS.json", root / "RESULTS.json"
+            )
+            update_queue_file(queue_path, [{"id": "TASK-1", "type": "proposal", "source": SOURCE}])
+            advance_task_file(queue_path, "TASK-1", "SELECTED")
+            advance_task_file(queue_path, "TASK-1", "IN_PROGRESS")
+
+            def run_tasks(*tasks):
+                tasks_path.write_text(json.dumps({"tasks": list(tasks)}), encoding="utf-8")
+                return run(tasks_path, results_path, queue_path), json.loads(results_path.read_text(encoding="utf-8"))
+
+            code, _ = run_tasks({"id": "verify", "type": "verify_test_patch_sandbox", "source": SOURCE,
+                                 "queue_task_id": "TASK-1"})
+            self.assertEqual(code, 0)
+            evidence = [e for e in load_queue(queue_path)["history"] if e["event"] == "VERIFICATION_RECORDED"]
+            self.assertEqual(evidence[-1]["revision"], source_tree_digest(ROOT / "autopoesis"))
+
+            done = {"id": "done", "type": "update_task_status", "task_id": "TASK-1", "status": "DONE"}
+            # The checkout was restored to other code between verification and completion.
+            with mock.patch("run_tasks.source_tree_digest", return_value="c" * 64):
+                code, results = run_tasks(done)
+            self.assertEqual(code, 1)
+            self.assertIn("no PASS verification", results["tasks"][0]["error"])
+            self.assertEqual(load_queue(queue_path)["items"][0]["status"], "IN_PROGRESS")
+
+            code, _ = run_tasks(done)
+            self.assertEqual(code, 0)
+            self.assertEqual(load_queue(queue_path)["items"][0]["status"], "DONE")
+
+    def test_source_tree_digest_follows_content_and_ignores_bytecode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory) / "autopoesis"
+            (package / "__pycache__").mkdir(parents=True)
+            (package / "core.py").write_text("x = 1\n", encoding="utf-8")
+            original = source_tree_digest(package)
+            (package / "__pycache__" / "core.cpython-312.pyc").write_bytes(b"cache")
+            self.assertEqual(source_tree_digest(package), original)
+            (package / "core.py").write_text("x = 2\n", encoding="utf-8")
+            self.assertNotEqual(source_tree_digest(package), original)
+            (package / "core.py").write_text("x = 1\n", encoding="utf-8")
+            (package / "extra.py").write_text("", encoding="utf-8")
+            self.assertNotEqual(source_tree_digest(package), original)
 
     def test_attempt_limit_stops_retries_but_allows_rejection(self):
         queue = fresh_queue()

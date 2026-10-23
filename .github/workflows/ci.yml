@@ -238,6 +238,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          from autopoesis.executor import source_tree_digest
           from autopoesis.task_queue import (
               advance_task_file,
               current_attempt,
@@ -255,14 +256,15 @@ jobs:
           }
           update_queue_file(queue_path, [probe])
           note = "synthetic CI fixture for cross-run restore verification"
+          revision = source_tree_digest(Path("autopoesis"))
           # Walk the governed lifecycle: DONE is accepted only after a PASS since IN_PROGRESS.
           advance_task_file(queue_path, probe["id"], "SELECTED", note)
           advance_task_file(queue_path, probe["id"], "IN_PROGRESS", note)
           record_verification_file(
               queue_path, probe["id"], "PASS", "CI_SYNTHETIC_PERSISTENCE_PROBE",
-              source=probe["source"], attempt=current_attempt(queue_path, probe["id"]),
+              source=probe["source"], attempt=current_attempt(queue_path, probe["id"]), revision=revision,
           )
-          advance_task_file(queue_path, probe["id"], "DONE", note)
+          advance_task_file(queue_path, probe["id"], "DONE", note, revision=revision)
           record_verification_file(
               queue_path,
               "CI-RESTORE-VERIFICATION-PROBE",
