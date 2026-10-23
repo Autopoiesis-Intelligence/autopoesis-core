@@ -177,7 +177,7 @@ class QueueHistoryValidationTests(unittest.TestCase):
             if revision is not None:
                 event["revision"] = revision
             if lease_token is not None:
-                event["lease_token"] = lease_token
+                event["lease_sha256"] = hashlib.sha256(lease_token.encode()).hexdigest()
             return event
 
         def write(events):
