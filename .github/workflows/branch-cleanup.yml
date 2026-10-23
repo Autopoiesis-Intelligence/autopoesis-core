@@ -1,0 +1,40 @@
+name: Branch cleanup
+
+# Manual run only. Deletes the branches listed in .github/branch-cleanup.txt
+# ("<branch> <sha-prefix>" per line), each only while its head still matches.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/branch-cleanup.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Delete listed branches whose head still matches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+          while read -r branch sha; do
+            case "$branch" in ""|"#"*|main) continue ;; esac
+            cur=$(gh api "repos/$REPO/git/ref/heads/$branch" --jq .object.sha 2>/dev/null || true)
+            case "$cur" in
+              "") echo "gone $branch" ;;
+              "$sha"*) gh api -X DELETE "repos/$REPO/git/refs/heads/$branch" && echo "deleted $branch" ;;
+              *) echo "SKIP $branch (head $cur, expected $sha)" ;;
+            esac
+          done < .github/branch-cleanup.txt
