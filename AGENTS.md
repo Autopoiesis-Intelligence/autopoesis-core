@@ -1,6 +1,6 @@
 # AGENTS.md: rules for every agent working on this repository
 
-This is the single policy file for humans and AI agents (Claude, GPT, Copilot, Manus and others). `CLAUDE.md` and `.github/copilot-instructions.md` only point here. Change the policy here, not in copies.
+This is the single policy file for humans and AI agents (Claude, GPT, Codex, Copilot and others). `CLAUDE.md` and `.github/copilot-instructions.md` only point here. Change the policy here, not in copies.
 
 Who does what, how a task moves through the agent stack, and which parts of that flow are proven to run on their own are described in [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md). The rules stay here.
 
