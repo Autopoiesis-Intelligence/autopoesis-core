@@ -184,7 +184,7 @@ The full BEFORE → ACTION → AFTER → RESULT report from `AGENTS.md` is writt
 | Earlier field | REPORT field |
 |---|---|
 | `CYCLE_ID` | `CYCLE` (the tick or session that produced the report) |
-| `STATE` | task status in each task line |
+| `STATE` | task status in each task line. This is the status of one task, not the STATE message: the message is a snapshot of the whole project, the field is one task's status. Automation must not treat them as one field |
 | `VERIFIED` | `Proven` |
 | `DEFECTS` | `Defects` |
 | `TESTS` | `Tests` and the CI run in each task line |
