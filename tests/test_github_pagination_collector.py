@@ -69,6 +69,18 @@ class PaginationCollectorTests(unittest.TestCase):
                 collection_key="workflow_runs", expected_page_size=2
             )
 
+    def test_next_link_cannot_change_fixed_query_filters(self):
+        changed = f"{BASE}?event=workflow_dispatch&status=failure&per_page=2&page=2"
+        initial = lambda page, size: (
+            {"total_count": 3, "workflow_runs": [{"id": 1}, {"id": 2}]},
+            f'<{changed}>; rel="next"',
+            f"{BASE}?event=workflow_dispatch&status=success&per_page={size}&page={page}",
+        )
+        with self.assertRaisesRegex(ValueError, "fixed query filters"):
+            collect_paginated_collection(
+                initial, collection_key="workflow_runs", expected_page_size=2
+            )
+
     def test_malformed_link_header_blocks(self):
         with self.assertRaisesRegex(ValueError, "Malformed"):
             collect_paginated_collection(
