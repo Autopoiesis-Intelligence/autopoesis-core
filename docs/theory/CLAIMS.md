@@ -81,3 +81,27 @@ Entry fields: `Kind`, `Status`, `Claim`, `Grounds`, `Counterarguments`, `Alterna
 - How to check: none yet; depends on OQ-001.
 - Links: CON-004, T2C-004, OQ-001.
 - History: 2026-10-23 recorded (CL-016).
+
+### CLM-008 — One compact theory base, outside records cited by version
+- Kind: design
+- Status: ACCEPTED
+- Claim: `docs/theory` is the core's only working theory base. Records in other repositories are cited by ID and exact version, never copied in bulk, and their own status is not evidence here.
+- Grounds: owner decision 2026-10-23 on OQ-008.
+- Counterarguments: citing outside records keeps them in a separate history that can drift or disappear.
+- Alternatives: import all 183 Gnosis-Memory records; move the base to Gnosis-Knowledge. Not adopted.
+- Risks: a cited SHA can become unreachable; the base can still grow too large if entries are added without a task.
+- How to check: `tests/test_theory_docs.py` checks IDs and links; a reviewer checks that each outside citation names a SHA.
+- Links: OQ-008, OQ-010.
+- History: 2026-10-23 recorded (CL-016).
+
+### CLM-009 — Autonomous research is not authority to change the core
+- Kind: design
+- Status: ACCEPTED
+- Claim: the core may form candidates, run permitted checks, compare results and choose its next research step without a human selector. Internal selection, a research `ACCEPTED`, a PASS or a selector decision never grants authority to execute a change. Changes to the core itself pass a controlled commit boundary with owner approval until safety and authority are separately proven.
+- Grounds: owner decision 2026-10-23 on OQ-009; consistent with `AGENTS.md` rules 1 and 6 and "Agents do not merge their own PRs".
+- Counterarguments: Gnosis `PHILOSOPHY.md` treats endogenous closure as fundamental; a permanent approval gate can be read as an external selector. The decision answers this by separating selection (internal) from authority (governed).
+- Alternatives: human approval of every research step; fully endogenous change after a trial. Not adopted.
+- Risks: the line between a research action and a state change must be enforced in code, or "research" becomes a path around the commit boundary.
+- How to check: T2C-006.
+- Links: CON-003, CON-007, OQ-009, T2C-006.
+- History: 2026-10-23 recorded (CL-016).

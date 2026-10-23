@@ -23,7 +23,7 @@ Entry fields: `Definition`, `Not to be confused with`, `Sources`, `Project use`,
 - Not to be confused with: one step of the loop existing in code. Steps existing ≠ the cycle being implemented.
 - Sources: SRC-004 (archive of variants with empirical evaluation; not checked). The cycle itself is a project decision recorded in `PROJECT_UNDERSTANDING.md` (project files, 2026-10-19), not in the repository.
 - Project use: `AGENTS.md` rule 6; roadmap stages A3–A9.
-- Claims: CLM-003.
+- Claims: CLM-003, CLM-009.
 
 ### CON-004 — State and relations, Ψ = (X, R)
 - Definition: the system's state is a set of elements (X) and typed relations between them (R), versioned as snapshots. Units, measurement and the semantic layer (which relation types exist and what follows from them) are not defined.
@@ -48,4 +48,4 @@ Entry fields: `Definition`, `Not to be confused with`, `Sources`, `Project use`,
 - Definition: evidence (a test, a hash, green CI, an audit) shows what is true at an exact SHA; authority permits a change. Evidence never becomes authority by itself.
 - Sources: project rule, no external source.
 - Project use: `AGENTS.md` rules 1–3 and the evidence ladder.
-- Claims: CLM-001, CLM-005.
+- Claims: CLM-001, CLM-005, CLM-009.

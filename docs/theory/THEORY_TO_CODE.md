@@ -50,3 +50,18 @@ Entry fields: `Claim`, `Rule or decision`, `Stage`, `Code`, `Tests`, `Evidence`,
 - Tests: none on `main`.
 - Evidence: DESIGN only.
 - Not proven: see OQ-005.
+
+### T2C-006 — Research autonomy versus change authority in A10–A12
+- Claim: CLM-009
+- Rule or decision: owner decision 2026-10-23 (OQ-009); `AGENTS.md` rules 1 and 6.
+- Stage: A7, A8 (already state that evidence is not authority), A10–A12 (must test the boundary).
+- Code: none yet on `main`.
+- Tests: none yet. Proposed before implementation, each with the observable result:
+  1. A selected candidate with a PASS whose patch targets the core, a test, a policy file or CI is refused; the queue file and the repository tree are byte-identical afterwards, and the refusal is a history event.
+  2. A research-`ACCEPTED` hypothesis or a selector decision passed where authority is required is refused with a typed error; nothing is written.
+  3. A run with no owner approval record for a core change stops before any write and reports why.
+  4. A run inside its pre-authorized scope completes select → execute → verify without human input, and its history shows no approval step.
+  5. Across an A11 trial, the report counts attempted out-of-scope writes and shows each one blocked; zero accepted without approval.
+  6. A12: a capability expansion proposed by the system cannot be approved by the system; the expansion requires an owner approval record naming the policy version.
+- Evidence: DESIGN only.
+- Not proven: everything; the tests above do not exist yet. The roadmap text does not yet state criteria 1–3 and 6 explicitly (proposal in the PR).

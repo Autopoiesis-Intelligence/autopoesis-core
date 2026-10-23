@@ -66,7 +66,8 @@ Entry fields: `Question`, `Why it matters`, `Options`, `Who decides`, `Blocks`, 
 - Options: keep this folder as the core's small working base and cite outside records as `Gnosis-Memory:C-0025@7a77642` only when a task needs one (recommended); import selected records with a re-check; move the base to Gnosis-Knowledge.
 - Who decides: the owner.
 - Blocks: importing outside records.
-- Status: UNRESOLVED
+- Status: ACCEPTED
+- Decision (owner, 2026-10-23): this folder stays the core's compact working theory base. No parallel registry, no bulk copy of the 183 records. Rules: every significant claim has a stable ID, status, source and scope; an outside record such as `Gnosis-Memory:C-0025` may be cited only with the exact version or SHA it resolves to, and its `FORMALIZED` status is not evidence; primary sources, formal definitions, mathematical proofs, test results and architectural hypotheses are kept apart, and no status is raised without matching evidence. Gnosis-Knowledge is not filled by copying: its role is OQ-010. Recorded as CLM-008.
 
 ### OQ-009 — Is human approval part of the target loop or outside it?
 - Question: Gnosis `PHILOSOPHY.md` and `CLAIMS.md` §E (at `935233c`) reject a permanent external selector or human confirmation as a necessary part of the endogenous core, and Gnosis-Core `docs/MASTER_SPEC.md` §2–3 (at `a209a96`) says the test is not an external operator. Gnosis-Memory `FINAL_PRODUCT_TZ_R2.md` §17 (at `7a77642`) keeps human governance at promotion boundaries. In this repository only the owner merges (`AGENTS.md`).
@@ -74,4 +75,21 @@ Entry fields: `Question`, `Why it matters`, `Options`, `Who decides`, `Blocks`, 
 - Options: endogenous selection inside the core with human governance only at promotion to the outside world; human approval as a permanent stage; human approval removed after a proven trial. SRC-007 (not checked) argues that a policy judging itself is a risk, which counts against full endogeneity.
 - Who decides: the owner.
 - Blocks: acceptance criteria for A10–A12.
+- Status: ACCEPTED
+- Decision (owner, 2026-10-23): a human is not a required selector of the internal research and learning loop, but internal selection, research acceptance of a hypothesis and authority to change the system are different operations. Changing the core itself stays behind a controlled commit boundary with owner approval until safety and authority are separately proven. No auto-merge, and no new agent authority through theory documents. A10–A12 must test these boundaries. Recorded as CLM-009; criteria-to-test mapping in T2C-006.
+
+### OQ-010 — What is Gnosis-Knowledge for?
+- Question: the role and responsibility boundaries of Gnosis-Knowledge relative to Gnosis-Memory, Gnosis `CLAIMS.md` and this folder.
+- Why it matters: OQ-008 forbids filling it by copying; until its role is defined it stays empty.
+- Options: a public, cross-project knowledge layer that cites this folder and Gnosis-Memory by SHA; retire it; merge its role into Gnosis-Memory.
+- Who decides: the owner.
+- Blocks: any content in Gnosis-Knowledge.
+- Status: UNRESOLVED
+
+### OQ-011 — What do the Lean files in Gnosis prove?
+- Question: Gnosis `formal/` at `935233c` has 18 Lean 4 files with 49 theorems and no `sorry` or `axiom`, but no `lean-toolchain`, no `lakefile` and no CI step, so the Lean version is not pinned and no build was ever recorded. Several invariants are placeholders defined as `True` (`formal/ConcreteInvariant.lean` lines 13–16, `formal/Sigma.lean` line 15, `formal/CanonicalBoundary.lean` line 15), so theorems about them hold trivially.
+- Why it matters: until a pinned build succeeds they are not checked proofs; even then, a theorem over a `True` placeholder says nothing about the code.
+- Options: pin a toolchain and add a build-only CI job in Gnosis (needs the owner's approval for a workflow change in that repository); replace placeholders with real definitions before citing any theorem.
+- Who decides: the owner for the CI change; Claude can run the build once a Lean toolchain host is reachable.
+- Blocks: citing any Gnosis theorem as a proof.
 - Status: UNRESOLVED
