@@ -29,6 +29,22 @@ class ScheduledWorkflowContractTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", self.source)
         self.assertIn("timeout-minutes: 20", self.source)
 
+    def test_disable_guard_gates_the_only_job_for_every_trigger(self):
+        # A job-level if skips every step, so it holds for schedule and manual dispatch,
+        # bootstrap included. A second job or a guard moved to a step would bypass it.
+        lines = self.source.splitlines()
+        jobs_at = lines.index("jobs:")
+        job_names = [line for line in lines[jobs_at + 1:]
+                     if line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":")]
+        self.assertEqual(job_names, ["  cycle:"])
+        job_if = lines[lines.index("  cycle:") + 1]
+        self.assertTrue(job_if.startswith("    if: ${{ "), job_if)
+        for guard in ("github.repository == 'Autopoiesis-Intelligence/autopoiesis-core'",
+                      "github.ref == 'refs/heads/main'",
+                      "vars.AUTOPOIESIS_CYCLE_DISABLED != 'true'"):
+            self.assertIn(guard, job_if)
+        self.assertNotIn("||", job_if)
+
     def test_restore_is_provenance_bound_and_fail_closed(self):
         self.assertIn("status=completed&per_page=100", self.source)
         self.assertIn("gh api --paginate --slurp", self.source)
