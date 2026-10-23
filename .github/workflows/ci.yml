@@ -98,12 +98,15 @@ jobs:
           )
           artifacts_response = subprocess.run(
               [
-                  "gh", "api",
-                  f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{requested_run_id}/artifacts",
+                  sys.executable, "-m", "autopoesis.github_pagination_cli",
+                  f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{requested_run_id}/artifacts",
+                  "--collection-key", "artifacts", "--output", ".restore-artifacts.json",
               ],
               check=True, capture_output=True, text=True,
           )
-          artifacts_payload = json.loads(artifacts_response.stdout)
+          artifacts_payload = json.loads(
+              Path(".restore-artifacts.json").read_text(encoding="utf-8")
+          )
           provenance = bind_source_artifact(
               provenance,
               artifacts_payload,
