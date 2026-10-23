@@ -70,6 +70,13 @@ Reasons follow after a blank line. A verdict counts only when all of these hold:
 
 The `Agent:` text line identifies the writer, but it is not proof of authorship. A verdict that fails any check is ignored and does not change the PR's state.
 
+**Codex review bot.** Commenting `@codex review` makes the Codex review bot review the PR head. Its summary comment carries a machine-readable `codex-review-state` marker. That marker also counts as a verdict, but only when all of these hold:
+- the comment is by the bot account itself (login `chatgpt-codex-connector[bot]`, user id `199175422`, type `Bot`) through the authorized auditor app above;
+- the code review `status` is `completed` and its `commit_sha` is the PR's current head;
+- `has_any_findings` is `true`, which counts as `REJECTED`, or both `has_any_findings` and `has_unresolved_findings` are `false`, which counts as `ACCEPTED`. Any other combination is no verdict.
+
+The bot edits this comment in place, so its verdict dates from the comment's last edit. A running or failed review, for example one stopped by the Codex usage limit, is no verdict.
+
 **Labels and transitions.** The state is recomputed from all comments on every check. A repeated or late event therefore changes nothing.
 
 | State | Labels | When |

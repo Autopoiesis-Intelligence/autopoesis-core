@@ -7,6 +7,10 @@ The rules live in AGENTS.md ("Review and audit"). A verdict counts only if:
 - GitHub reports that an authorized auditor app posted it
   (``performed_via_github_app``); the text ``Agent:`` line is never proof.
 
+The Codex review bot's summary comment also counts, read from its
+machine-readable ``codex-review-state`` marker: only a completed review of
+the current head, from the bot account itself through the same app.
+
 The state is recomputed from scratch each time, so a repeated or late event
 yields the same labels and no new action. Nothing here talks to GitHub:
 callers pass the PR facts and comments and apply the returned label changes.
@@ -15,6 +19,7 @@ callers pass the PR facts and comments and apply the returned label changes.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import sys
@@ -25,6 +30,8 @@ from typing import Any, Callable
 AUTHORIZED_AUDITOR_APPS = {1144995: "chatgpt-codex-connector"}
 AUDIT_DEADLINE = timedelta(days=7)
 VERDICTS = frozenset({"ACCEPTED", "REJECTED"})
+# The Codex review bot posts as its own Bot account through the auditor app; login and id must both match.
+CODEX_REVIEW_BOT = {"login": "chatgpt-codex-connector[bot]", "id": 199175422}
 
 LABEL_PENDING = "pending-audit"
 LABEL_BLOCKED = "blocked-review"
@@ -35,6 +42,7 @@ MANAGED_LABELS = frozenset({LABEL_PENDING, LABEL_BLOCKED, LABEL_READY, LABEL_OVE
 _VERDICT_LINE = re.compile(r"^Verdict: (\S+)$")
 _PR_LINE = re.compile(r"^pr: #?(\d+)$")
 _SHA_LINE = re.compile(r"^head_sha: ([0-9a-f]{40})$")
+_CODEX_STATE = re.compile(r"<!-- codex-review-state:v1 (\{.*?\}) -->", re.S)
 
 
 def parse_verdict(body: Any) -> dict[str, Any] | None:
@@ -52,9 +60,57 @@ def parse_verdict(body: Any) -> dict[str, Any] | None:
     return {"verdict": verdict.group(1), "pr": int(pr.group(1)), "head_sha": sha.group(1)}
 
 
+def parse_codex_review_state(body: Any) -> dict[str, Any] | None:
+    """Return the verdict carried by a completed Codex code review summary, or None.
+
+    A review with no findings is ACCEPTED and one with findings is REJECTED.
+    A running or failed review, or one whose flags are not both known, is no verdict.
+    """
+    if not isinstance(body, str):
+        return None
+    match = _CODEX_STATE.search(html.unescape(body))
+    if match is None:
+        return None
+    try:
+        review = json.loads(match.group(1)).get("code_review")
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(review, dict) or review.get("status") != "completed":
+        return None
+    sha = review.get("commit_sha")
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        return None
+    any_findings, unresolved = review.get("has_any_findings"), review.get("has_unresolved_findings")
+    if any_findings is True:
+        verdict = "REJECTED"
+    elif any_findings is False and unresolved is False:
+        verdict = "ACCEPTED"
+    else:
+        # Unresolved findings without new ones may be left over from an older head; wait for a clear result.
+        return None
+    return {"verdict": verdict, "pr": None, "head_sha": sha}
+
+
+def _is_codex_review_bot(user: Any) -> bool:
+    return (
+        isinstance(user, dict)
+        and user.get("type") == "Bot"
+        and user.get("login") == CODEX_REVIEW_BOT["login"]
+        and user.get("id") == CODEX_REVIEW_BOT["id"]
+    )
+
+
+def read_verdict(comment: dict[str, Any]) -> dict[str, Any] | None:
+    """The verdict a comment carries in either accepted format, before any authorization check."""
+    parsed = parse_verdict(comment.get("body"))
+    if parsed is None and _is_codex_review_bot(comment.get("user")):
+        parsed = parse_codex_review_state(comment.get("body"))
+    return parsed
+
+
 def classify_comment(comment: dict[str, Any], *, pr_number: int, head_sha: str) -> str:
     """Return VALID or the reason a comment is not a usable verdict for this head."""
-    parsed = parse_verdict(comment.get("body"))
+    parsed = read_verdict(comment)
     if parsed is None:
         return "NOT_A_VERDICT"
     app = comment.get("performed_via_github_app")
@@ -64,7 +120,8 @@ def classify_comment(comment: dict[str, Any], *, pr_number: int, head_sha: str) 
         or AUTHORIZED_AUDITOR_APPS.get(app["id"]) != app.get("slug")
     ):
         return "UNAUTHORIZED"
-    if parsed["pr"] != pr_number:
+    # The bot summary names no PR; it is valid only among the comments of the PR it was posted on.
+    if parsed["pr"] is not None and parsed["pr"] != pr_number:
         return "WRONG_PR"
     if parsed["head_sha"] != head_sha.lower():
         return "STALE_SHA"
@@ -96,12 +153,14 @@ def evaluate_pr_audit(
             continue
         decisions.append({"comment_id": comment.get("id"), "decision": reason})
         if reason == "VALID":
-            valid.append((_parse_time(comment.get("created_at")), comment.get("id"), comment))
+            # The bot edits its summary in place, so its verdict dates from the last edit.
+            at = comment.get("updated_at") if _is_codex_review_bot(comment.get("user")) else comment.get("created_at")
+            valid.append((_parse_time(at), comment.get("id"), comment))
 
     if valid:
         # The newest valid verdict on the current head wins.
         _, comment_id, latest = max(valid, key=lambda item: (item[0], item[1] or 0))
-        verdict = parse_verdict(latest["body"])["verdict"]
+        verdict = read_verdict(latest)["verdict"]
         if verdict == "REJECTED":
             state = "BLOCKED_REVIEW"
         else:

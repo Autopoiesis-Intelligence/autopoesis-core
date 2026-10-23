@@ -16,6 +16,27 @@ HEAD_B = "b" * 40
 PUSHED = "2026-10-20T12:00:00Z"
 SOON = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
 GPT = {"id": 1144995, "slug": "chatgpt-codex-connector", "name": "ChatGPT Codex Connector"}
+CODEX_BOT = {"login": "chatgpt-codex-connector[bot]", "id": 199175422, "type": "Bot"}
+SHARED_ACCOUNT = {"login": "Autopoiesis-Intelligence", "id": 1, "type": "User"}
+
+
+def codex_summary(comment_id, *, sha=HEAD_A, status="completed", any_findings=False, unresolved=False,
+                  user=CODEX_BOT, app=GPT, updated="2026-10-20T13:00:00Z", escaped=False):
+    """A Codex review summary comment, shaped like the bot's real ones on PR #34 (2026-10-23)."""
+    state = json.dumps({
+        "code_review": {"commit_sha": sha, "has_any_findings": any_findings,
+                        "has_unresolved_findings": unresolved, "status": status},
+        "security_review": {"commit_sha": None, "has_any_findings": None,
+                            "has_unresolved_findings": None, "status": None},
+    }, separators=(",", ":"))
+    if escaped:
+        state = state.replace("{", "&#123;").replace("}", "&#125;")
+    body = (
+        "<!-- codex-pull-request-review-summary -->\n"
+        f"<!-- codex-review-state:v1 {state} -->\n\n## Codex Review Summary\n"
+    )
+    return {"id": comment_id, "body": body, "user": user, "performed_via_github_app": app,
+            "created_at": "2026-10-20T12:30:00Z", "updated_at": updated}
 
 
 def verdict_comment(comment_id, verdict="ACCEPTED", pr=29, sha=HEAD_A, app=GPT, created="2026-10-20T13:00:00Z"):
@@ -229,6 +250,64 @@ class FakeGitHub:
     def check(self, now):
         result = evaluate([], labels=sorted(self.labels), now=now)
         return apply_audit_result(result, notify_owner=self.notify, add_labels=self.add, remove_labels=self.remove)
+
+
+class CodexReviewSummaryTests(unittest.TestCase):
+    def test_completed_review_without_findings_accepts_the_reviewed_head(self):
+        result = evaluate([codex_summary(1)])
+        self.assertEqual(result["state"], "READY_FOR_OWNER")
+        self.assertEqual(result["verdict_comment_id"], 1)
+
+    def test_completed_review_with_findings_blocks_review(self):
+        self.assertEqual(evaluate([codex_summary(1, any_findings=True, unresolved=True)])["state"], "BLOCKED_REVIEW")
+
+    def test_running_failed_or_unclear_reviews_are_no_verdict(self):
+        for label, comment in {
+            "running": codex_summary(1, status="running", any_findings=None, unresolved=None),
+            "failed after a usage limit": codex_summary(1, status="failed", any_findings=True, unresolved=True),
+            "only old unresolved findings": codex_summary(1, any_findings=False, unresolved=True),
+            "flags missing": codex_summary(1, any_findings=None, unresolved=None),
+        }.items():
+            with self.subTest(label):
+                result = evaluate([comment])
+                self.assertEqual(result["state"], "PENDING_AUDIT")
+                self.assertEqual(result["decisions"], [])
+
+    def test_review_of_an_older_head_is_stale(self):
+        result = evaluate([codex_summary(1, sha=HEAD_B)])
+        self.assertEqual(result["state"], "PENDING_AUDIT")
+        self.assertEqual(result["decisions"], [{"comment_id": 1, "decision": "STALE_SHA"}])
+
+    def test_only_the_bot_account_through_the_auditor_app_counts(self):
+        cases = {
+            "shared account pasting the marker": (codex_summary(1, user=SHARED_ACCOUNT), "PENDING_AUDIT", []),
+            "bot login with another id": (
+                codex_summary(1, user={**CODEX_BOT, "id": 2}), "PENDING_AUDIT", []),
+            "bot login typed as a user": (
+                codex_summary(1, user={**CODEX_BOT, "type": "User"}), "PENDING_AUDIT", []),
+            "bot without the auditor app": (
+                codex_summary(1, app=None), "PENDING_AUDIT", [{"comment_id": 1, "decision": "UNAUTHORIZED"}]),
+        }
+        for label, (comment, state, decisions) in cases.items():
+            with self.subTest(label):
+                result = evaluate([comment])
+                self.assertEqual(result["state"], state)
+                self.assertEqual(result["decisions"], decisions)
+
+    def test_html_escaped_marker_is_read_the_same(self):
+        self.assertEqual(evaluate([codex_summary(1, escaped=True)])["state"], "READY_FOR_OWNER")
+
+    def test_malformed_marker_is_no_verdict(self):
+        comment = codex_summary(1)
+        comment["body"] = comment["body"].replace('"status":"completed"}', '"status":"completed"')
+        self.assertEqual(evaluate([comment])["state"], "PENDING_AUDIT")
+
+    def test_bot_summary_dates_from_its_last_edit(self):
+        gpt_rejects = verdict_comment(5, verdict="REJECTED", created="2026-10-20T14:00:00Z")
+        early = codex_summary(1, updated="2026-10-20T13:00:00Z")
+        late = codex_summary(1, updated="2026-10-20T15:00:00Z")
+        self.assertEqual(evaluate([early, gpt_rejects])["state"], "BLOCKED_REVIEW")
+        self.assertEqual(evaluate([late, gpt_rejects])["state"], "READY_FOR_OWNER")
 
 
 class ApplyAuditResultTests(unittest.TestCase):
