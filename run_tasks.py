@@ -11,7 +11,12 @@ from typing import Any
 
 from autopoesis.core import EvolutionError, digest_state, evolve
 from autopoesis.task_queue import advance_task_file, current_attempt, record_verification_file, update_queue_file
-from autopoesis.executor import apply_patch_to_sandbox, prepare_patch_artifact, verify_test_patch_in_sandbox
+from autopoesis.executor import (
+    apply_patch_to_sandbox,
+    prepare_patch_artifact,
+    source_tree_digest,
+    verify_test_patch_in_sandbox,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -137,7 +142,9 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
         note = task.get("note", "")
         if not isinstance(target_id, str) or not isinstance(status, str) or not isinstance(note, str):
             raise ValueError("update_task_status requires string task_id, status, and optional note")
-        result = advance_task_file(queue_path, target_id, status, note)
+        # DONE is checked against the code as it is now, never a revision named by task data.
+        revision = source_tree_digest(ROOT / "autopoesis") if status == "DONE" else None
+        result = advance_task_file(queue_path, target_id, status, note, revision=revision)
     elif task_type == "prepare_test_patch":
         result = prepare_patch_artifact(task, ROOT)
     elif task_type == "verify_test_patch_sandbox":
@@ -168,6 +175,7 @@ def execute_task(task: dict[str, Any], queue_path: Path) -> dict[str, Any]:
             result.get("artifact_sha256"),
             task.get("source"),
             attempt,
+            result.get("source_tree_sha256"),
         )
 
     task_status = "FAIL" if result.get("verification_status") == "FAIL" else "PASS"
