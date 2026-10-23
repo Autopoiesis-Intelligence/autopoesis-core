@@ -15,9 +15,9 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 
 | Blocker | Unblocks | Who |
 |---|---|---|
-| Codex verdict on #33 at `8952df52600473ab7c27c363d73e2fdd05551a34` | merge of #33 | GPT/Codex, then owner |
-| Codex verdict on #34 at `480533b3eb376e3fcda5bfdce10a2bd7692c4eb3` | merge of #34 | GPT/Codex, then owner |
-| Codex review usage limit reached (2026-10-23 09:30 UTC; still reached at 12:48 UTC) | Codex verdicts on #33, #34, #36 | wait for the limit, or GPT audits from ChatGPT |
+| Codex verdict on #33 at current HEAD `c2857da7d42a90d1e71afce3ed51d51b5d536de4` | merge of #33 | GPT/Codex, then owner |
+| Codex verdict on #34 at current HEAD `c375985e7d3cc318f68143fe4a3b290db3a19765` | merge of #34 | GPT/Codex, then owner |
+| `@codex review` requested on current heads #33–#37; no current-head verdict confirmed yet | close audit blockers | GPT/Codex; verify receipts by exact SHA |
 | Five own PRs already waiting (limit 5) | opening the P2 PR | owner merges or raises the limit |
 
 ## Tasks
@@ -25,17 +25,17 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 ### P0 — A3 closed task lifecycle — `IN_REVIEW` (PR #33)
 - **Goal:** only legal transitions; DONE only after a PASS for the item's own source since its latest IN_PROGRESS; no unchecked status writer.
 - **Evidence so far:** at `8952df5`: PR CI 39931369279, seed 39931361330, restore 39931975513. Codex findings fixed since `74c3126`: stale verifier (attempt binding), PASS bound to the tested code revision, history edges replayed against the table on load, attempt counter checked against history, attempt type.
-- **Remaining:** a Codex verdict on `8952df5` (blocked by the Codex usage limit, see Blockers); owner merge; CI on the merge commit.
+- **Remaining:** a Codex verdict on current HEAD `c2857da7d42a90d1e71afce3ed51d51b5d536de4`; owner merge; CI on the merge commit.
 
 ### P0 — A4 deterministic next-task selection — `IN_REVIEW` (PR #34)
 - **Depends on:** #33.
 - **Evidence so far:** at `480533b` (contains #33 `8952df5`): PR CI 39932079992. Codex found no major issues on `79e4692`; its P2 on `88e6671` (malformed priority) is fixed in `d9151ef`.
-- **Remaining:** Codex verdict; after #33 merges, update the branch onto `main`, re-run CI, and get a verdict on the new head; owner merge.
+- **Remaining:** a Codex verdict on current HEAD `c375985e7d3cc318f68143fe4a3b290db3a19765`; after #33 merges, update the branch onto `main`, re-run CI, and get a verdict on the new head; owner merge.
 
 ### P1 — A9 task leases and recovery of stuck tasks — `IN_REVIEW` (PR #36, chained)
 - **Depends on:** #34 (and therefore #33). Built on the #34 branch; if #33/#34 change, A9 is rebuilt.
 - **Evidence so far:** at `4787a13` (contains #34 `480533b`): PR CI 39932167542, seed 39932159904, restore 39932194829. Codex P1s fixed: two live leases rejected on load; replayed PASS needs a revision and a lease token.
-- **Remaining:** a Codex verdict on `4787a13` (blocked by the usage limit); owner confirmation of the ci.yml probe lines; merge after #34.
+- **Remaining:** a Codex verdict on current HEAD `a759aed99f21871cd2e98fc5589ccec875669aa4`; owner confirmation of the ci.yml probe lines; merge after #34.
 - **Design and test scenarios:** `/mnt/project-files/reviews/autonomous-stack/A9_LEASE_PLAN_2026-10-23.md`, summarized here.
 - **Acceptance:**
   1. The lease owner, token and expiry are persisted, validated by `load_queue`, and survive restore.
