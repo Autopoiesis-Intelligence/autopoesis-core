@@ -41,15 +41,19 @@ Today `AGENTS.md` counts a verdict only from an issue comment posted through app
 
 ## Where things live
 
+This table is the answer to "where is the project state". Each kind of state has exactly one home; no other registry is created for it.
+
 | Thing | Where | Notes |
 |---|---|---|
 | Rules | `AGENTS.md` on `main` | Changes only through a reviewed PR the owner merges |
 | Roles, task flow, automation status | this file | Status table updated with evidence, never in advance |
-| Ordered task plan | `docs/PLAN.md` | PR #35, **not merged** as of `685c5a0`. Owner sets priorities, GPT adds criteria, Claude updates statuses and evidence |
+| Ordered task plan | `docs/PLAN.md` | PR #35, **not merged** as of `685c5a0`. Owner sets priorities, GPT adds criteria, Claude updates statuses and evidence. One permanent ID per task; a parallel direction (workstream) is a group of tasks there, not a separate register |
 | Theory | `docs/theory/` | PR #37 (CL-016, branch `claude/project-thread-ofxc12`), not merged. This file does not duplicate it |
 | Roadmap A0–A12 | `docs/AUTONOMY_ROADMAP_SPEC.md` on `main` | |
+| Overall progress | header of `docs/PLAN.md` | Not written yet. Denominator: the 13 stages A0–A12. A stage counts only when its acceptance criteria are met on `main` with CI on the merge commit. Anything else is reported as `NOT MEASURED`, never as a guessed percentage |
+| Link task ↔ theory | `Theory:` field of a task in `docs/PLAN.md` (CLM-/OQ- IDs); task ID in the row of `docs/theory/THEORY_TO_CODE.md` | Not written yet; needs edits to PR #35 and PR #37 |
 | Claims, handoffs, live coordination | Issue #22 | Protocol in `docs/coordination/PROTOCOL.md`, PR #32, **not merged** |
-| Audit verdicts | the PR they audit | Format in `AGENTS.md` |
+| Audit verdicts | the PR they audit, as an issue comment | Format in `AGENTS.md`. A copy in a chat proves nothing |
 | CI and the core's Copilot runs | GitHub Actions | `ci.yml` (`test` is the required check), `copilot-test-writer.yml`, `copilot-agent-trial.yml`, `copilot-smoke.yml` |
 
 Live GitHub state (refs, SHAs, runs) outranks every document and every chat summary, including this one.
@@ -132,9 +136,46 @@ Nothing in this stack merges automatically. No agent merges, enables auto-merge,
 
 - **Codex verdicts.** Whether a Codex bot review counts as a verdict (plan item P2), which changes the review rules in `AGENTS.md`.
 
-## Coordination with ChatGPT: message templates
+## Work protocol
 
-ChatGPT has no reliable unattended channel yet (see "Automation status"), so the owner sometimes carries messages between ChatGPT and Claude. Use these blocks so nothing is lost on the way. Every field names exact values. "unknown" is a valid answer; a guess is not. GitHub stays the source of truth, and a message never replaces a verdict posted on the PR.
+Proposed (owner, 2026-10-23 15:38 UTC: "do not declare it final before my agreement"). It ties messages to the homes listed in "Where things live": **state lives on GitHub and in those files; a message carries only what changed, with exact references.** No message restates the whole project, the roles or the rules.
+
+### Three status scales, never mixed
+
+| Scale | Values | Used for | Defined in |
+|---|---|---|---|
+| Task status | `PROPOSED`, `READY`, `IN_PROGRESS`, `BLOCKED`, `IN_REVIEW`, `DONE`, `REJECTED` | a task in `docs/PLAN.md` | here and `docs/PLAN.md` |
+| Evidence level | `DESIGN` … `CI_PROVEN`, always with an exact SHA | a claim that something works | `AGENTS.md` |
+| Knowledge status | `OBSERVED` … `SUPERSEDED` | a theory claim (`CLM-`) | `docs/theory/INDEX.md` |
+
+`pending-audit`, `blocked-review` and `ready-for-owner` are PR labels inside `IN_REVIEW`, not task statuses. Write `Verdict: ACCEPTED` or `CLM: ACCEPTED` in full; the bare word means different things on different scales.
+
+### Messages
+
+**TASK** (owner or GPT → Claude). Claude adds it to `docs/PLAN.md` if it is not there.
+
+```
+TASK <ID> <one-line goal>
+Accept: <checkable criteria>
+Theory: <CLM-/OQ- IDs or none>
+Depends: <task ID / PR or none>
+Approved: <what the owner explicitly allowed, or none>
+```
+
+**REPORT** (Claude → owner or GPT). One line per task that changed, then the shared fields.
+
+```
+REPORT <UTC date>
+<ID> <task status> <PR> <head SHA7> CI <run id> <ok|fail> — <what changed, one line>
+Proven: <claim — evidence>
+Not proven: <claim — what is missing>
+NEEDS_OWNER: <exact question, or merge PR#/SHA, or NONE>
+NEXT: <ID — step — completion criterion>
+```
+
+The full BEFORE → ACTION → AFTER → RESULT report from `AGENTS.md` is written for a significant change only, in the PR body, not in chat. A request for the whole state ("state?") is answered with the same REPORT over all open tasks, built from GitHub and `docs/PLAN.md`, not from memory. "Next" (Далее) means: continue the first `READY` task in `docs/PLAN.md`, within authority and the PR limit.
+
+**Audit handoff with ChatGPT.** These two blocks are kept as they were agreed. ChatGPT has no proven unattended channel yet (see "Automation status"), so the owner may carry them. Every field names exact values. "unknown" is a valid answer; a guess is not.
 
 **Owner → ChatGPT** (ask for an audit or a decision):
 
@@ -167,7 +208,27 @@ Owner decision given: <none | the decision, with date and who>
 Next SEQ: <one step, acceptance criteria, permissions it needs>
 ```
 
-Rules: a block about a different `head_sha` than the PR's current head is stale and changes nothing. "Owner decision given" counts only when the owner wrote it himself; a summary by an agent is not his approval. Claude answers in the `AGENTS.md` report format.
+**VERDICT** (GPT/Codex → the PR): only the `AGENTS.md` format, as an issue comment on that PR. The GPT → Claude block reports a verdict; it does not replace it.
+
+### Rules for these messages
+
+- **Owner decisions.** "Owner decision given" and `Approved:` count only when the owner expressed the decision himself: his own message in the project thread, on the PR or in Issue #22, or his choice on a decision card. Silence, an agent's summary or inference, a label, green CI or an `ACCEPTED` verdict is never an owner decision.
+- **Exact head.** A verdict, a CI result and a REPORT line are valid only for the `head_sha` they name. A block about another SHA than the PR's current head is stale and changes nothing. After a new head: CI runs again on it; a new verdict for the new head is required (`AGENTS.md`); the auditor may limit the review to `git diff <audited SHA>..<new head>` but must name the new head; any claim of RUNTIME or PERSISTED is observed again if the change touches that path.
+- **Independent check.** A REPORT is the executor's account, not independent confirmation. Every SHA and run id in it can be checked directly: `https://api.github.com/repos/Autopoiesis-Intelligence/autopoiesis-core/actions/runs/<run id>` shows `head_sha` and `conclusion`.
+
+### What exists and what is only described
+
+| Part | State |
+|---|---|
+| Evidence ladder, report format, verdict format, PR limit, no merge by agents | Implemented as rules on `main` (`AGENTS.md`) |
+| Audit label computation (`audit_verdict.py`) | Implemented on `main`; applied by an agent, not by the repository |
+| Task register and statuses | Described: `docs/PLAN.md`, PR #35 not merged; its status set predates the scale above (`IN_REVIEW` covers both) |
+| Roles and this protocol | Described: this file, no PR yet (PR limit) |
+| Theory base | Described: PR #37 not merged |
+| Claims and their checker | Described: PR #32 not merged |
+| `Theory:` links, progress header | Not written |
+| REPORT built automatically from GitHub | Not implemented |
+| ChatGPT sending TASK or verdicts without the owner | NOT PROVEN |
 
 ## Keeping this file current
 
