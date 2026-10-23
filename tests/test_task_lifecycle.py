@@ -22,8 +22,11 @@ from autopoesis.task_queue import (
 from run_tasks import run
 
 
+SOURCE = "autopoesis/task_queue.py"
+
+
 def fresh_queue():
-    return merge_candidates(empty_queue(), [{"id": "TASK-1", "type": "proposal"}])["queue"]
+    return merge_candidates(empty_queue(), [{"id": "TASK-1", "type": "proposal", "source": SOURCE}])["queue"]
 
 
 def advance(queue, *statuses):
@@ -32,7 +35,7 @@ def advance(queue, *statuses):
     return queue
 
 
-def with_verification(queue, status):
+def with_verification(queue, status, source=SOURCE):
     queue = json.loads(json.dumps(queue))
     queue["history"].append({
         "event": "VERIFICATION_RECORDED",
@@ -40,6 +43,7 @@ def with_verification(queue, status):
         "verification_status": status,
         "verification_level": "UNIT_TEST_FIXTURE",
         "artifact_sha256": None,
+        "source": source,
         "at": "2999-01-01T00:00:00+00:00",
     })
     return queue
@@ -91,6 +95,46 @@ class TaskLifecycleTests(unittest.TestCase):
         done = advance(with_verification(in_progress, "PASS"), "DONE")
         self.assertEqual(done["items"][0]["status"], "DONE")
 
+    def test_pass_for_a_different_source_does_not_count(self):
+        in_progress = advance(fresh_queue(), "SELECTED", "IN_PROGRESS")
+        for forged in ("autopoesis/core.py", None):
+            queue = with_verification(in_progress, "PASS", source=forged)
+            if forged is None:
+                del queue["history"][-1]["source"]
+            with self.assertRaisesRegex(EvolutionError, "own source"):
+                advance_task(queue, "TASK-1", "DONE")
+
+    def test_item_without_source_cannot_reach_done(self):
+        queue = merge_candidates(empty_queue(), [{"id": "TASK-1", "type": "proposal"}])["queue"]
+        queue = with_verification(advance(queue, "SELECTED", "IN_PROGRESS"), "PASS")
+        with self.assertRaisesRegex(EvolutionError, "own source"):
+            advance_task(queue, "TASK-1", "DONE")
+
+    def test_verification_file_binds_evidence_to_the_item_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "TASK_QUEUE.json"
+            update_queue_file(path, [
+                {"id": "TASK-1", "type": "proposal", "source": SOURCE},
+                {"id": "NO-SOURCE", "type": "proposal"},
+            ])
+            before = path.read_bytes()
+            for task_id, source, message in (
+                ("TASK-1", "autopoesis/core.py", "does not match"),
+                ("TASK-1", None, "does not match"),
+                ("NO-SOURCE", SOURCE, "no source to bind"),
+            ):
+                with self.subTest(task_id=task_id, source=source):
+                    with self.assertRaisesRegex(EvolutionError, message):
+                        record_verification_file(path, task_id, "PASS", "unit", source=source)
+            self.assertEqual(path.read_bytes(), before)
+            record_verification_file(path, "TASK-1", "PASS", "unit", source=SOURCE)
+            self.assertEqual(load_queue(path)["history"][-1]["source"], SOURCE)
+
+    def test_queue_module_exposes_no_unchecked_status_writer(self):
+        import autopoesis.task_queue as task_queue
+        self.assertFalse(hasattr(task_queue, "record_outcome"))
+        self.assertFalse(hasattr(task_queue, "record_outcome_file"))
+
     def test_pass_from_an_earlier_attempt_does_not_count_after_retry(self):
         queue = with_verification(advance(fresh_queue(), "SELECTED", "IN_PROGRESS"), "PASS")
         queue = advance(queue, "OPEN", "SELECTED", "IN_PROGRESS")
@@ -130,7 +174,10 @@ class TaskLifecycleTests(unittest.TestCase):
             queue_path, tasks_path, results_path = (
                 root / "TASK_QUEUE.json", root / "TASKS.json", root / "RESULTS.json"
             )
-            update_queue_file(queue_path, [{"id": "QUEUE-ITEM", "type": "proposal"}])
+            update_queue_file(queue_path, [
+                {"id": "QUEUE-ITEM", "type": "proposal", "source": SOURCE},
+                {"id": "OTHER-ITEM", "type": "proposal", "source": "autopoesis/core.py"},
+            ])
 
             def run_tasks(*tasks):
                 tasks_path.write_text(json.dumps({"tasks": list(tasks)}), encoding="utf-8")
@@ -144,6 +191,17 @@ class TaskLifecycleTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("no PASS verification", results["tasks"][2]["error"])
 
+            # A real PASS for task_queue.py must not be credited to an item about core.py.
+            code, results = run_tasks({
+                "id": "verify-other",
+                "type": "verify_test_patch_sandbox",
+                "source": SOURCE,
+                "queue_task_id": "OTHER-ITEM",
+            })
+            self.assertEqual(code, 1)
+            self.assertIn("does not match", results["tasks"][0]["error"])
+            self.assertFalse([e for e in load_queue(queue_path)["history"] if e["event"] == "VERIFICATION_RECORDED"])
+
             code, _ = run_tasks({
                 "id": "verify",
                 "type": "verify_test_patch_sandbox",
@@ -152,15 +210,17 @@ class TaskLifecycleTests(unittest.TestCase):
             }, status("DONE"))
             self.assertEqual(code, 0)
             queue = load_queue(queue_path)
-            self.assertEqual(queue["items"][0]["status"], "DONE")
-            self.assertEqual(queue["items"][0]["attempts"], 1)
+            item = next(i for i in queue["items"] if i["id"] == "QUEUE-ITEM")
+            self.assertEqual(item["status"], "DONE")
+            self.assertEqual(item["attempts"], 1)
             evidence = [e for e in queue["history"] if e["event"] == "VERIFICATION_RECORDED"]
             self.assertEqual([e["task_id"] for e in evidence], ["QUEUE-ITEM"])
 
             code, results = run_tasks(status("OPEN"))
             self.assertEqual(code, 1)
             self.assertIn("Illegal transition", results["tasks"][0]["error"])
-            self.assertEqual(load_queue(queue_path)["items"][0]["status"], "DONE")
+            item = next(i for i in load_queue(queue_path)["items"] if i["id"] == "QUEUE-ITEM")
+            self.assertEqual(item["status"], "DONE")
 
 
 ROOT = Path(__file__).resolve().parents[1]

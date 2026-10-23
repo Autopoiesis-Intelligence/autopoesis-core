@@ -130,7 +130,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
 
             set_status("SELECTED")
             set_status("IN_PROGRESS")
-            record_verification_file(queue_path, candidate["id"], "PASS", "UNIT_TEST_FIXTURE")
+            record_verification_file(queue_path, candidate["id"], "PASS", "UNIT_TEST_FIXTURE", source=candidate["source"])
             set_status("DONE")
             after_first_run = load_queue(queue_path)
             prior_history = list(after_first_run["history"])

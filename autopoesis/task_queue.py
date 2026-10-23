@@ -139,6 +139,8 @@ def _validate_history(history: list[Any]) -> None:
                 or any(char not in "0123456789abcdef" for char in artifact_hash)
             ):
                 raise EvolutionError(f"{prefix}: artifact_sha256 must be a lowercase SHA-256 hex digest")
+            if "source" in event and (not isinstance(event["source"], str) or not event["source"].strip()):
+                raise EvolutionError(f"{prefix}: source must be a non-empty string")
 
 
 def load_queue(path: Path) -> dict[str, Any]:
@@ -251,8 +253,8 @@ def merge_candidates(queue: dict[str, Any], candidates: list[dict[str, Any]]) ->
     return {"queue": merged, "added": added, "total": len(merged["items"])}
 
 
-def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str = "") -> dict[str, Any]:
-    """Record a status change without lifecycle policy; task data goes through advance_task."""
+def _apply_transition(queue: dict[str, Any], task_id: str, status: str, note: str = "") -> dict[str, Any]:
+    """Write one status change; private so that every caller goes through advance_task."""
     if not isinstance(task_id, str) or not task_id.strip():
         raise EvolutionError("Task id must be a non-empty string")
     if not isinstance(status, str) or status not in QUEUE_STATUSES:
@@ -285,16 +287,19 @@ def record_outcome(queue: dict[str, Any], task_id: str, status: str, note: str =
     return updated
 
 
-def _has_passing_verification(queue: dict[str, Any], task_id: str) -> bool:
-    """True when the latest verification since the last IN_PROGRESS entry is PASS."""
+def _has_passing_verification(queue: dict[str, Any], item: dict[str, Any]) -> bool:
+    """True when the latest verification of this item's own source since its last IN_PROGRESS is PASS."""
+    source = item.get("source")
+    if not isinstance(source, str) or not source.strip():
+        return False
     latest = None
     for event in queue.get("history", []):
-        if event.get("task_id") != task_id:
+        if event.get("task_id") != item["id"]:
             continue
         if event.get("event") == "STATUS_CHANGED" and event.get("to") == "IN_PROGRESS":
             latest = None
         elif event.get("event") == "VERIFICATION_RECORDED":
-            latest = event.get("verification_status")
+            latest = event.get("verification_status") if event.get("source") == source else None
     return latest == "PASS"
 
 
@@ -307,15 +312,20 @@ def advance_task(queue: dict[str, Any], task_id: str, status: str, note: str = "
         raise EvolutionError(f"Expected exactly one queued task with id {task_id!r}")
     item = matches[0]
     previous = item.get("status")
+    attempts = item.get("attempts", 0)
+    if type(attempts) is not int or attempts < 0:
+        raise EvolutionError(f"Invalid attempts count for queued task {task_id!r}")
     if previous == status:
         return {"queue": json.loads(canonical_json(queue)), "changed": False}
     if status not in ALLOWED_TRANSITIONS.get(previous, frozenset()):
         raise EvolutionError(f"Illegal transition for task {task_id!r}: {previous!r} -> {status!r}")
-    if status == "IN_PROGRESS" and item.get("attempts", 0) >= MAX_ATTEMPTS:
+    if status == "IN_PROGRESS" and attempts >= MAX_ATTEMPTS:
         raise EvolutionError(f"Task {task_id!r} reached the attempt limit of {MAX_ATTEMPTS}; reject it instead")
-    if status == "DONE" and not _has_passing_verification(queue, task_id):
-        raise EvolutionError(f"Task {task_id!r} has no PASS verification since its latest IN_PROGRESS")
-    return {"queue": record_outcome(queue, task_id, status, note), "changed": True}
+    if status == "DONE" and not _has_passing_verification(queue, item):
+        raise EvolutionError(
+            f"Task {task_id!r} has no PASS verification of its own source since its latest IN_PROGRESS"
+        )
+    return {"queue": _apply_transition(queue, task_id, status, note), "changed": True}
 
 
 def record_verification_file(
@@ -324,8 +334,9 @@ def record_verification_file(
     verification_status: str,
     verification_level: str,
     artifact_sha256: str | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
-    """Persist a verification result as evidence without changing task lifecycle status."""
+    """Persist verification evidence; evidence for a queued item must name that item's source."""
     if not isinstance(task_id, str) or not task_id.strip():
         raise EvolutionError("Verification task_id must be a non-empty string")
     if not isinstance(verification_status, str) or verification_status not in {"PASS", "FAIL"}:
@@ -338,9 +349,20 @@ def record_verification_file(
         or any(char not in "0123456789abcdef" for char in artifact_sha256)
     ):
         raise EvolutionError("artifact_sha256 must be a lowercase SHA-256 hex digest")
+    if source is not None and (not isinstance(source, str) or not source.strip()):
+        raise EvolutionError("Verification source must be a non-empty string")
 
     with queue_write_lock(path):
         queue = load_queue(path)
+        item = next((entry for entry in queue["items"] if entry["id"] == task_id), None)
+        if item is not None:
+            expected = item.get("source")
+            if not isinstance(expected, str) or not expected.strip():
+                raise EvolutionError(f"Queued task {task_id!r} has no source to bind verification to")
+            if source != expected:
+                raise EvolutionError(
+                    f"Verification source {source!r} does not match queued task {task_id!r} source {expected!r}"
+                )
         event = {
             "event": "VERIFICATION_RECORDED",
             "task_id": task_id,
@@ -349,6 +371,8 @@ def record_verification_file(
             "artifact_sha256": artifact_sha256,
             "at": datetime.now(timezone.utc).isoformat(),
         }
+        if source is not None:
+            event["source"] = source
         updated = json.loads(canonical_json(queue))
         updated["history"].append(event)
         _write_queue_atomically(path, updated)
@@ -362,15 +386,6 @@ def update_queue_file(path: Path, candidates: list[dict[str, Any]]) -> dict[str,
         result = merge_candidates(current, candidates)
         _write_queue_atomically(path, result["queue"])
     return {"added": result["added"], "total": result["total"], "path": path.as_posix()}
-
-
-def record_outcome_file(path: Path, task_id: str, status: str, note: str = "") -> dict[str, Any]:
-    """Persist a status transition and its audit event to the queue file."""
-    with queue_write_lock(path):
-        queue = load_queue(path)
-        updated = record_outcome(queue, task_id, status, note)
-        _write_queue_atomically(path, updated)
-    return {"task_id": task_id, "status": status, "path": path.as_posix()}
 
 
 def advance_task_file(path: Path, task_id: str, status: str, note: str = "") -> dict[str, Any]:
