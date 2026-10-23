@@ -199,13 +199,13 @@ def _validate_history(history: list[Any]) -> None:
                 raise EvolutionError(f"{prefix}: artifact_sha256 must be a lowercase SHA-256 hex digest")
             if "source" in event and (not isinstance(event["source"], str) or not event["source"].strip()):
                 raise EvolutionError(f"{prefix}: source must be a non-empty string")
-            if "lease_token" in event and not _is_token(event["lease_token"]):
-                raise EvolutionError(f"{prefix}: lease_token must be a 32-character lowercase hex token")
+            if "lease_sha256" in event and not _is_digest(event["lease_sha256"]):
+                raise EvolutionError(f"{prefix}: lease_sha256 must be a lowercase SHA-256 hex digest")
         if event_type == "LEASE_EXPIRED":
             if not isinstance(event.get("owner"), str) or not event["owner"].strip():
                 raise EvolutionError(f"{prefix}: owner must be a non-empty string")
-            if event.get("token") is not None and not _is_token(event.get("token")):
-                raise EvolutionError(f"{prefix}: token must be a 32-character lowercase hex token")
+            if event.get("lease_sha256") is not None and not _is_digest(event.get("lease_sha256")):
+                raise EvolutionError(f"{prefix}: lease_sha256 must be a lowercase SHA-256 hex digest")
             if event.get("expires_at") is not None:
                 _aware(event["expires_at"], f"{prefix}: expires_at")
             if "attempt" in event and (type(event["attempt"]) is not int or event["attempt"] < 1):
@@ -289,8 +289,8 @@ def load_queue(path: Path) -> dict[str, Any]:
                 and event.get("source") == sources.get(task_id)
                 and event.get("attempt") == replayed_attempts.get(task_id)
                 and _is_digest(event.get("revision"))
-                and _is_token(event.get("lease_token"))
-                and _lease_fingerprint(event["lease_token"]) == replayed_lease.get(task_id)
+                and _is_digest(event.get("lease_sha256"))
+                and event["lease_sha256"] == replayed_lease.get(task_id)
             )
             latest_verification[task_id] = event["verification_status"] if bound else None
             continue
@@ -439,7 +439,8 @@ def _has_passing_verification(queue: dict[str, Any], item: dict[str, Any], revis
             bound = (
                 event.get("source") == source
                 and event.get("attempt") == item.get("attempts")
-                and event.get("lease_token") == token
+                and token is not None
+                and event.get("lease_sha256") == _lease_fingerprint(token)
                 and event.get("revision") == revision
             )
             latest = event.get("verification_status") if bound else None
@@ -552,7 +553,7 @@ def recover_expired_leases(queue: dict[str, Any], *, now: datetime | None = None
             "event": "LEASE_EXPIRED",
             "task_id": item["id"],
             "owner": owner,
-            "token": lease["token"] if lease else None,
+            "lease_sha256": _lease_fingerprint(lease["token"]) if lease else None,
             "expires_at": lease["expires_at"] if lease else None,
             # History time is wall-clock, like every other event, so ordering stays monotonic.
             "at": datetime.now(timezone.utc).isoformat(),
@@ -697,7 +698,7 @@ def record_verification_file(
         if source is not None:
             event["source"] = source
         if item is not None:
-            event["lease_token"] = token
+            event["lease_sha256"] = _lease_fingerprint(token)
             event["attempt"] = attempt
             if revision is not None:
                 event["revision"] = revision

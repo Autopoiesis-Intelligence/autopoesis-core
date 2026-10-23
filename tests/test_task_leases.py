@@ -1,5 +1,6 @@
 """A9: leases keep one executor per task and let a crashed executor's task be recovered."""
 
+import hashlib
 import json
 import os
 import signal
@@ -117,9 +118,10 @@ class TaskLeaseTests(unittest.TestCase):
         self.assertEqual(recovered["status"], "OPEN")
         self.assertNotIn("lease", recovered)
         expired = [e for e in queue["history"] if e["event"] == "LEASE_EXPIRED"]
-        self.assertEqual([(e["task_id"], e["owner"], e["token"]) for e in expired],
-                         [("TASK-1", "executor-A", old_token)])
+        self.assertEqual([(e["task_id"], e["owner"], e["lease_sha256"]) for e in expired],
+                         [("TASK-1", "executor-A", hashlib.sha256(old_token.encode()).hexdigest())])
         self.assertTrue(queue["history"][-2]["note"].startswith("recovered: lease expired"))
+        self.assertNotIn(old_token, json.dumps(queue["history"]))
 
         # T5: a new executor takes the task with a new token.
         new_token = advance_task_file(self.path, "TASK-1", "SELECTED", owner="executor-B", now=LATER)["lease"]["token"]
@@ -161,9 +163,10 @@ class TaskLeaseTests(unittest.TestCase):
         self.assertEqual(item(self.path)["status"], "DONE")
         queue = json.loads(self.path.read_text(encoding="utf-8"))
         selected = next(e for e in queue["history"] if e["event"] == "STATUS_CHANGED" and e["to"] == "SELECTED")
-        self.assertNotIn(token, json.dumps(selected))
+        # The bearer token never reaches durable history, only its fingerprint.
+        self.assertNotIn(token, json.dumps(queue["history"]))
         passed = next(e for e in queue["history"] if e["event"] == "VERIFICATION_RECORDED")
-        passed["lease_token"] = "f" * 32 if token != "f" * 32 else "e" * 32
+        passed["lease_sha256"] = hashlib.sha256(("f" * 32 if token != "f" * 32 else "e" * 32).encode()).hexdigest()
         self.path.write_text(json.dumps(queue), encoding="utf-8")
         with self.assertRaisesRegex(EvolutionError, "without a PASS"):
             load_queue(self.path)

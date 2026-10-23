@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -51,7 +52,7 @@ def with_verification(queue, status, source=SOURCE, revision=REVISION):
         "verification_level": "UNIT_TEST_FIXTURE",
         "artifact_sha256": None,
         "source": source,
-        "lease_token": token_of(queue, "TASK-1"),
+        "lease_sha256": hashlib.sha256(token_of(queue, "TASK-1").encode()).hexdigest(),
         "attempt": next(i for i in queue["items"] if i["id"] == "TASK-1")["attempts"],
         "revision": revision,
         "at": "2999-01-01T00:00:00+00:00",
