@@ -28,7 +28,7 @@ def valid_evidence():
                 "source_repository": REPO, "task_queue_sha256": QUEUE_SHA,
                 "task_queue_size_bytes": 256,
             },
-            "snapshot_sha256": QUEUE_SHA,
+            "snapshot_sha256": QUEUE_SHA, "snapshot_size_bytes": 256,
         }],
     }
 
@@ -61,6 +61,26 @@ class RecoveryProposalTests(unittest.TestCase):
         evidence["runs"][0]["repository"] = {"full_name": REPO}
         result = build_recovery_proposal(evidence)
         self.assertEqual(result["status"], "PROPOSAL_READY")
+
+    def test_missing_or_rerun_attempt_blocks(self):
+        for attempt in (None, 2):
+            with self.subTest(attempt=attempt):
+                evidence = valid_evidence()
+                if attempt is None:
+                    del evidence["runs"][0]["run_attempt"]
+                else:
+                    evidence["runs"][0]["run_attempt"] = attempt
+                self.assertEqual(build_recovery_proposal(evidence)["status"], "BLOCKED")
+
+    def test_missing_or_conflicting_observed_size_blocks(self):
+        for observed_size in (None, 255):
+            with self.subTest(observed_size=observed_size):
+                evidence = valid_evidence()
+                if observed_size is None:
+                    del evidence["artifacts"][0]["snapshot_size_bytes"]
+                else:
+                    evidence["artifacts"][0]["snapshot_size_bytes"] = observed_size
+                self.assertEqual(build_recovery_proposal(evidence)["status"], "BLOCKED")
 
     def test_no_evidence_blocks(self):
         result = build_recovery_proposal({"repository": REPO, "history_complete": True, "runs": [], "artifacts": []})
