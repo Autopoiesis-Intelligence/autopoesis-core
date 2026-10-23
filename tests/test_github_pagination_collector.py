@@ -60,6 +60,15 @@ class PaginationCollectorTests(unittest.TestCase):
                 collection_key="workflow_runs", expected_page_size=2
             )
 
+    def test_cross_endpoint_link_blocks(self):
+        url = "https://attacker.example/repos/example/repo/actions/runs?per_page=2&page=2"
+        with self.assertRaisesRegex(ValueError, "changes API origin or endpoint"):
+            collect_paginated_collection(
+                fixture_fetch([{"total_count": 3, "workflow_runs": [{"id": 1}, {"id": 2}]}],
+                              [f'<{url}>; rel="next"']),
+                collection_key="workflow_runs", expected_page_size=2
+            )
+
     def test_malformed_link_header_blocks(self):
         with self.assertRaisesRegex(ValueError, "Malformed"):
             collect_paginated_collection(
