@@ -33,7 +33,7 @@ class ScheduledStateSelectionTests(unittest.TestCase):
             run(10, 10, conclusion="success"),
             run(11, 11, conclusion="failure"),
         ]}]
-        with self.assertRaisesRegex(ValueError, "Refusing to restore an older snapshot"):
+        with self.assertRaisesRegex(ValueError, "unresolved prior cycle"):
             select_prior_successful_run(pages, current_run_id=12, bootstrap=False)
 
     def test_newer_cancelled_cycle_refuses_rollback(self):
@@ -41,7 +41,7 @@ class ScheduledStateSelectionTests(unittest.TestCase):
             run(10, 10, conclusion="success"),
             run(11, 11, conclusion="cancelled"),
         ]}]
-        with self.assertRaisesRegex(ValueError, "newest cycle run 11"):
+        with self.assertRaisesRegex(ValueError, "newest run 11"):
             select_prior_successful_run(pages, current_run_id=12, bootstrap=False)
 
     def test_rerun_attempt_is_never_selected_as_persisted_state(self):
@@ -52,13 +52,15 @@ class ScheduledStateSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "run_attempt=2"):
             select_prior_successful_run(pages, current_run_id=12, bootstrap=False)
 
-    def test_bootstrap_does_not_treat_rerun_as_successful_history(self):
-        pages = [{"workflow_runs": [
-            {**run(11, 11, conclusion="success"), "run_attempt": 2},
-        ]}]
-        self.assertIsNone(
+    def test_bootstrap_refused_after_failed_only_history(self):
+        pages = [{"workflow_runs": [run(11, 11, conclusion="failure")]}]
+        with self.assertRaisesRegex(ValueError, "unresolved prior cycle"):
             select_prior_successful_run(pages, current_run_id=12, bootstrap=True)
-        )
+
+    def test_bootstrap_refused_after_cancelled_only_history(self):
+        pages = [{"workflow_runs": [run(11, 11, conclusion="cancelled")]}]
+        with self.assertRaisesRegex(ValueError, "unresolved prior cycle"):
+            select_prior_successful_run(pages, current_run_id=12, bootstrap=True)
 
     def test_bootstrap_refused_when_success_is_only_on_later_page(self):
         pages = [
@@ -72,8 +74,8 @@ class ScheduledStateSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "malformed"):
             select_prior_successful_run([{"unexpected": []}], current_run_id=102, bootstrap=True)
 
-    def test_bootstrap_only_allowed_when_complete_history_has_no_success(self):
-        pages = [{"workflow_runs": [run(1, 1, conclusion="failure")]}]
+    def test_bootstrap_only_allowed_when_no_prior_cycle_exists(self):
+        pages = [{"workflow_runs": []}]
         self.assertIsNone(select_prior_successful_run(pages, current_run_id=2, bootstrap=True))
         with self.assertRaisesRegex(ValueError, "No successful prior snapshot"):
             select_prior_successful_run(pages, current_run_id=2, bootstrap=False)
