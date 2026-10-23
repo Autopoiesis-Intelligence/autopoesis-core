@@ -29,6 +29,9 @@ def select_prior_successful_run(
         and run.get("id") != current_run_id
         and run.get("head_branch") == "main"
         and run.get("conclusion") == "success"
+        # A rerun reuses the original run ID/run_number but may replace artifacts
+        # or replay old queue state. Never use rerun attempts as persistence sources.
+        and run.get("run_attempt", 1) == 1
         and isinstance(run.get("path"), str)
         and run["path"].split("@", 1)[0] == WORKFLOW_PATH
     ]
