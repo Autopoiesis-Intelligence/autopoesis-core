@@ -286,9 +286,15 @@ def latest_source_run_id(
 
     current_id = int(_run_id_text(current_run_id))
     candidates = []
-    for run in runs:
-        if not isinstance(run, dict) or type(run.get("id")) is not int:
-            continue
+    for index, run in enumerate(runs):
+        if not isinstance(run, dict):
+            raise ValueError(
+                f"Workflow run history entry {index} must be a JSON object"
+            )
+        if type(run.get("id")) is not int:
+            raise ValueError(
+                f"Workflow run history entry {index} must contain an integer run ID"
+            )
         path = run.get("path")
         workflow_path = path.split("@", 1)[0] if isinstance(path, str) else ""
         if (
