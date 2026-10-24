@@ -392,7 +392,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not the latest snapshot.*latest is 300"):
             self._latest_check(200, runs)
 
-    def test_runs_that_cannot_hold_a_snapshot_do_not_count_as_newer(self):
+    def test_malformed_run_history_entry_fails_closed(self):
         runs = [
             self._dispatch_run(500),
             self._dispatch_run(440, event="push"),
@@ -403,7 +403,8 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             self._dispatch_run(300),
         ]
 
-        self.assertTrue(self._latest_check(300, runs)["source_is_latest"])
+        with self.assertRaisesRegex(ValueError, "entry 5 must be a JSON object"):
+            self._latest_check(300, runs)
 
     def test_newer_rerun_dispatch_blocks_snapshot_fallback(self):
         runs = [
