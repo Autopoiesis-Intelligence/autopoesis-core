@@ -56,6 +56,18 @@ class LatestSourceRunTests(unittest.TestCase):
                 current_branch=BRANCH,
             )
 
+    def test_refuses_to_fall_back_when_newest_relevant_run_was_rerun(self):
+        runs = payload(
+            run(10, conclusion="success", attempt=1),
+            run(30, conclusion="success", attempt=2),
+        )
+        with self.assertRaisesRegex(ValueError, "run_attempt=1"):
+            latest_source_run_id(
+                runs,
+                current_run_id=40,
+                current_branch=BRANCH,
+            )
+
     def test_excludes_current_run(self):
         runs = payload(run(10), run(20))
         self.assertEqual(
