@@ -288,18 +288,25 @@ def latest_source_run_id(
         workflow_path = path.split("@", 1)[0] if isinstance(path, str) else ""
         if (
             run["id"] != current_id
-            and run.get("conclusion") == "success"
             and run.get("event") == "workflow_dispatch"
             and run.get("head_branch") == current_branch
             and workflow_path == expected_workflow_path
         ):
-            candidates.append(run["id"])
+            candidates.append(run)
     if not candidates:
         raise ValueError(
-            f"No successful workflow_dispatch snapshot run found on branch {current_branch!r}"
+            f"No workflow_dispatch snapshot run found on branch {current_branch!r}"
         )
-    # GitHub run IDs increase monotonically, so the largest ID is the newest run.
-    return max(candidates)
+
+    # Fail closed on the newest relevant run rather than silently rolling back
+    # to an older successful snapshot when the latest dispatch failed/cancelled.
+    newest = max(candidates, key=lambda candidate: candidate["id"])
+    if newest.get("conclusion") != "success":
+        raise ValueError(
+            f"Newest workflow_dispatch snapshot run {newest['id']} must have "
+            f"conclusion=success; got {newest.get('conclusion')!r}"
+        )
+    return newest["id"]
 
 
 def require_latest_source_run(
