@@ -49,7 +49,7 @@ class LatestSourceRunTests(unittest.TestCase):
             run(29, branch="main", conclusion="failure"),
             run(28, event="push", conclusion="failure"),
         )
-        with self.assertRaisesRegex(ValueError, "Newest workflow_dispatch snapshot run 30"):
+        with self.assertRaisesRegex(ValueError, "newest workflow_dispatch snapshot run 30"):
             latest_source_run_id(
                 runs,
                 current_run_id=40,
