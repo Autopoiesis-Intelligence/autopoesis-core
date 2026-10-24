@@ -12,6 +12,7 @@ def run(run_id, number, *, conclusion="success", branch="main", path=WORKFLOW):
     return {
         "id": run_id,
         "run_number": number,
+        "run_attempt": 1,
         "conclusion": conclusion,
         "head_branch": branch,
         "path": path,
@@ -52,6 +53,18 @@ class ScheduledStateSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "run_attempt=2"):
             select_prior_successful_run(pages, current_run_id=12, bootstrap=False)
 
+    def test_skipped_runs_from_the_disable_switch_are_ignored(self):
+        disabled_only = [{"workflow_runs": [run(11, 11, conclusion="skipped")]}]
+        self.assertIsNone(select_prior_successful_run(disabled_only, current_run_id=12, bootstrap=True))
+        with self.assertRaisesRegex(ValueError, "No successful prior snapshot"):
+            select_prior_successful_run(disabled_only, current_run_id=12, bootstrap=False)
+        paused_after_success = [{"workflow_runs": [
+            run(10, 10, conclusion="success"),
+            run(11, 11, conclusion="skipped"),
+        ]}]
+        selected = select_prior_successful_run(paused_after_success, current_run_id=12, bootstrap=False)
+        self.assertEqual(selected["id"], 10)
+
     def test_bootstrap_refused_after_failed_only_history(self):
         pages = [{"workflow_runs": [run(11, 11, conclusion="failure")]}]
         with self.assertRaisesRegex(ValueError, "unresolved prior cycle"):
@@ -70,9 +83,56 @@ class ScheduledStateSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "prior successful cycle"):
             select_prior_successful_run(pages, current_run_id=102, bootstrap=True)
 
-    def test_malformed_history_fails_closed(self):
+    def test_malformed_page_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "malformed"):
             select_prior_successful_run([{"unexpected": []}], current_run_id=102, bootstrap=True)
+
+    def test_non_object_run_entry_fails_closed(self):
+        pages = [{"workflow_runs": [run(10, 10), "malformed"]}]
+        with self.assertRaisesRegex(ValueError, "non-object"):
+            select_prior_successful_run(pages, current_run_id=11, bootstrap=True)
+
+    def test_missing_or_non_integer_required_fields_fail_closed(self):
+        for field, value in (
+            ("id", None),
+            ("id", "10"),
+            ("id", True),
+            ("run_number", None),
+            ("run_number", "10"),
+            ("run_number", False),
+            ("run_attempt", None),
+            ("run_attempt", "1"),
+            ("run_attempt", True),
+        ):
+            with self.subTest(field=field, value=value):
+                malformed = run(10, 10)
+                if value is None:
+                    malformed.pop(field)
+                else:
+                    malformed[field] = value
+                with self.assertRaisesRegex(ValueError, "missing or malformed"):
+                    select_prior_successful_run(
+                        [{"workflow_runs": [malformed]}],
+                        current_run_id=11,
+                        bootstrap=True,
+                    )
+
+    def test_missing_or_non_string_branch_and_path_fail_closed(self):
+        for field, value in (
+            ("head_branch", None),
+            ("head_branch", 3),
+            ("path", None),
+            ("path", 3),
+        ):
+            with self.subTest(field=field, value=value):
+                malformed = run(10, 10)
+                malformed[field] = value
+                with self.assertRaisesRegex(ValueError, "missing or malformed"):
+                    select_prior_successful_run(
+                        [{"workflow_runs": [malformed]}],
+                        current_run_id=11,
+                        bootstrap=True,
+                    )
 
     def test_bootstrap_only_allowed_when_no_prior_cycle_exists(self):
         pages = [{"workflow_runs": []}]

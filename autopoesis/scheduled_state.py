@@ -8,6 +8,11 @@ from typing import Any
 WORKFLOW_PATH = ".github/workflows/autopoiesis-cycle.yml"
 
 
+def _positive_integer(value: Any) -> bool:
+    """Return true for positive integers, excluding bool values."""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 def select_prior_successful_run(
     pages: Any, *, current_run_id: int, bootstrap: bool
 ) -> dict[str, Any] | None:
@@ -19,35 +24,56 @@ def select_prior_successful_run(
     """
     if not isinstance(pages, list) or not pages:
         raise ValueError("workflow runs history is incomplete or malformed")
-    if any(not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list)
-           for page in pages):
+    if any(
+        not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list)
+        for page in pages
+    ):
         raise ValueError("workflow runs page is malformed")
 
     runs = [run for page in pages for run in page["workflow_runs"]]
+    for run in runs:
+        if not isinstance(run, dict):
+            raise ValueError("workflow runs history contains a non-object run entry")
+        if not _positive_integer(run.get("id")):
+            raise ValueError("workflow run id is missing or malformed")
+        if not _positive_integer(run.get("run_number")):
+            raise ValueError("workflow run run_number is missing or malformed")
+        if not _positive_integer(run.get("run_attempt")):
+            raise ValueError("workflow run run_attempt is missing or malformed")
+        if not isinstance(run.get("head_branch"), str):
+            raise ValueError("workflow run head_branch is missing or malformed")
+        if not isinstance(run.get("path"), str):
+            raise ValueError("workflow run path is missing or malformed")
+        if run.get("conclusion") is not None and not isinstance(run.get("conclusion"), str):
+            raise ValueError("workflow run conclusion is malformed")
+
     relevant = [
-        run for run in runs
-        if isinstance(run, dict)
-        and run.get("id") != current_run_id
-        and run.get("head_branch") == "main"
-        and isinstance(run.get("path"), str)
+        run
+        for run in runs
+        if run["id"] != current_run_id
+        and run["head_branch"] == "main"
         and run["path"].split("@", 1)[0] == WORKFLOW_PATH
+        # A skipped run never started the job (disable switch, repository or branch guard),
+        # so it changed no state; counting it would make the disable switch block bootstrap
+        # and restore forever.
+        and run.get("conclusion") != "skipped"
     ]
     relevant.sort(
-        key=lambda run: (run.get("run_number", 0), run.get("id", 0)),
+        key=lambda run: (run["run_number"], run["id"]),
         reverse=True,
     )
     prior = [
-        run for run in relevant
-        if run.get("conclusion") == "success"
-        and run.get("run_attempt", 1) == 1
+        run
+        for run in relevant
+        if run.get("conclusion") == "success" and run["run_attempt"] == 1
     ]
 
     if relevant and (not prior or relevant[0] is not prior[0]):
         latest = relevant[0]
         raise ValueError(
             "Refusing to restore or bootstrap after an unresolved prior cycle: "
-            f"newest run {latest.get('id')} has conclusion={latest.get('conclusion')!r} "
-            f"and run_attempt={latest.get('run_attempt', 1)!r}"
+            f"newest run {latest['id']} has conclusion={latest.get('conclusion')!r} "
+            f"and run_attempt={latest['run_attempt']!r}"
         )
 
     if prior and bootstrap:
