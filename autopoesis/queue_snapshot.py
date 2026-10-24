@@ -295,7 +295,7 @@ def latest_source_run_id(
             candidates.append(run)
     if not candidates:
         raise ValueError(
-            f"No workflow_dispatch snapshot run found on branch {current_branch!r}"
+            f"No successful workflow_dispatch snapshot run found on branch {current_branch!r}"
         )
 
     # Fail closed on the newest relevant run rather than silently rolling back
@@ -303,8 +303,9 @@ def latest_source_run_id(
     newest = max(candidates, key=lambda candidate: candidate["id"])
     if newest.get("conclusion") != "success":
         raise ValueError(
-            f"Newest workflow_dispatch snapshot run {newest['id']} must have "
-            f"conclusion=success; got {newest.get('conclusion')!r}"
+            f"No successful workflow_dispatch snapshot run: newest workflow_dispatch "
+            f"snapshot run {newest['id']} must have conclusion=success; "
+            f"got {newest.get('conclusion')!r}"
         )
     return newest["id"]
 
