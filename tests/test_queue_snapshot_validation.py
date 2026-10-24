@@ -393,7 +393,6 @@ class QueueSnapshotValidationTests(unittest.TestCase):
     def test_runs_that_cannot_hold_a_snapshot_do_not_count_as_newer(self):
         runs = [
             self._dispatch_run(500),
-            self._dispatch_run(450, conclusion="failure"),
             self._dispatch_run(440, event="push"),
             self._dispatch_run(430, head_branch="other"),
             self._dispatch_run(420, path=".github/workflows/other.yml@refs/heads/main"),
@@ -404,13 +403,23 @@ class QueueSnapshotValidationTests(unittest.TestCase):
 
         self.assertTrue(self._latest_check(300, runs)["source_is_latest"])
 
+    def test_newer_failed_dispatch_blocks_snapshot_fallback(self):
+        runs = [
+            self._dispatch_run(500),
+            self._dispatch_run(450, conclusion="failure"),
+            self._dispatch_run(300),
+        ]
+
+        with self.assertRaisesRegex(ValueError, "newest workflow_dispatch snapshot run 450"):
+            self._latest_check(300, runs)
+
     def test_source_from_another_branch_is_rejected(self):
         runs = [self._dispatch_run(300, head_branch="other"), self._dispatch_run(200)]
 
         with self.assertRaisesRegex(ValueError, "not the latest snapshot.*latest is 200"):
             self._latest_check(300, runs)
 
-    def test_automatic_selection_picks_newest_eligible_run_and_skips_the_current_one(self):
+    def test_automatic_selection_refuses_newer_failed_run_and_skips_the_current_one(self):
         runs = [
             self._dispatch_run(500),
             self._dispatch_run(450, conclusion="failure"),
@@ -418,10 +427,12 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             self._dispatch_run(200),
         ]
 
-        self.assertEqual(
-            latest_source_run_id({"workflow_runs": runs}, current_run_id=500, current_branch="main"),
-            300,
-        )
+        with self.assertRaisesRegex(ValueError, "newest workflow_dispatch snapshot run 450"):
+            latest_source_run_id(
+                {"workflow_runs": runs},
+                current_run_id=500,
+                current_branch="main",
+            )
 
     def test_automatic_selection_fails_closed_without_an_eligible_run(self):
         runs = [self._dispatch_run(500), self._dispatch_run(300, head_branch="other")]
