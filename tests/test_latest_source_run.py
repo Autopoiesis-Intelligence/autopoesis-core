@@ -12,8 +12,9 @@ BRANCH = "gpt/a30-38-restore-selector-tests"
 
 
 def run(run_id, *, branch=BRANCH, conclusion="success", event="workflow_dispatch",
-        path=WORKFLOW, attempt=1):
+        path=WORKFLOW, attempt=1, title="CI"):
     return {
+        "display_title": title,
         "id": run_id,
         "head_branch": branch,
         "conclusion": conclusion,
@@ -55,6 +56,19 @@ class LatestSourceRunTests(unittest.TestCase):
                 current_run_id=40,
                 current_branch=BRANCH,
             )
+
+    def test_expected_negative_fault_failure_does_not_block_clean_restore(self):
+        fault = "Negative restore fault: tamper_bytes"
+        runs = payload(run(10), run(11, conclusion="failure", title=fault))
+        self.assertEqual(latest_source_run_id(runs, current_run_id=12, current_branch=BRANCH), 10)
+        # A real failure after the fault run still blocks rollback.
+        runs = payload(run(10), run(11, conclusion="failure", title=fault), run(12, conclusion="failure"))
+        with self.assertRaisesRegex(ValueError, "newest workflow_dispatch snapshot run 12"):
+            latest_source_run_id(runs, current_run_id=13, current_branch=BRANCH)
+        # A fault run that did not fail, or was re-run, is refused instead of being skipped.
+        for bad in (run(11, conclusion="success", title=fault), run(11, conclusion="failure", title=fault, attempt=2)):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "Negative-fault run 11"):
+                latest_source_run_id(payload(run(10), bad), current_run_id=12, current_branch=BRANCH)
 
     def test_refuses_to_fall_back_when_newest_relevant_run_was_rerun(self):
         runs = payload(

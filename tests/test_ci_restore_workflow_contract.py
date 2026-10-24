@@ -35,3 +35,14 @@ class CIRestoreWorkflowContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NegativeFaultRunNameTests(unittest.TestCase):
+    def test_fault_dispatch_run_name_matches_the_selector_prefix(self):
+        from autopoesis.queue_snapshot import NEGATIVE_FAULT_TITLE_PREFIX
+
+        run_name = next(line for line in WORKFLOW.read_text(encoding="utf-8").splitlines()
+                        if line.startswith("run-name: "))
+        self.assertIn(f"format('{NEGATIVE_FAULT_TITLE_PREFIX}{{0}}', inputs.restore_fault)", run_name)
+        self.assertIn("github.event_name == 'workflow_dispatch'", run_name)
+        self.assertIn("inputs.restore_fault != 'none'", run_name)

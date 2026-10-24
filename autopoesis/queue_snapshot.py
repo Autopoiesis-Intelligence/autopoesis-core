@@ -14,6 +14,9 @@ from .task_queue import load_queue
 
 
 _GIT_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
+# ci.yml sets this run-name prefix on dispatches that inject a restore fault. Such a run must
+# fail and never yields a selectable snapshot, so an expected failure does not block restore.
+NEGATIVE_FAULT_TITLE_PREFIX = "Negative restore fault: "
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -303,6 +306,14 @@ def latest_source_run_id(
             and run.get("head_branch") == current_branch
             and workflow_path == expected_workflow_path
         ):
+            title = run.get("display_title")
+            if isinstance(title, str) and title.startswith(NEGATIVE_FAULT_TITLE_PREFIX):
+                if run.get("conclusion") != "failure" or run.get("run_attempt") != 1:
+                    raise ValueError(
+                        f"Negative-fault run {run['id']} must have failed on its first attempt; "
+                        f"got conclusion={run.get('conclusion')!r}, run_attempt={run.get('run_attempt')!r}"
+                    )
+                continue
             candidates.append(run)
     if not candidates:
         raise ValueError(
