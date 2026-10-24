@@ -244,6 +244,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
     def _valid_source_run(self):
         return {
             "id": 12345,
+            "run_attempt": 1,
             "conclusion": "success",
             "event": "workflow_dispatch",
             "path": ".github/workflows/ci.yml@refs/heads/main",
@@ -361,6 +362,7 @@ class QueueSnapshotValidationTests(unittest.TestCase):
     def _dispatch_run(self, run_id, **overrides):
         run = {
             "id": run_id,
+            "run_attempt": 1,
             "conclusion": "success",
             "event": "workflow_dispatch",
             "head_branch": "main",
@@ -402,6 +404,16 @@ class QueueSnapshotValidationTests(unittest.TestCase):
         ]
 
         self.assertTrue(self._latest_check(300, runs)["source_is_latest"])
+
+    def test_newer_rerun_dispatch_blocks_snapshot_fallback(self):
+        runs = [
+            self._dispatch_run(500, run_attempt=1),
+            self._dispatch_run(450, run_attempt=2),
+            self._dispatch_run(300),
+        ]
+
+        with self.assertRaisesRegex(ValueError, "run_attempt=1"):
+            self._latest_check(300, runs)
 
     def test_newer_failed_dispatch_blocks_snapshot_fallback(self):
         runs = [
