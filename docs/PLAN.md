@@ -34,7 +34,7 @@ Owner-approved protocol (yarik, 2026-10-24 12:03 UTC). Claude's tick takes the t
 
 | ID | Task | Branch / PR | Depends on | Done criterion | Status |
 |---|---|---|---|---|---|
-| N1 | A30.58: the ci.yml restore harness can run a clean restore after an expected negative-fault run, without weakening the newest-run rule for real failures | #48 `gpt/a30-46-unfiltered-restore-history` | — | On one SHA, in sequence: seed → restore → fault → clean restore all behave as specified. A test proves that a newer real failure still refuses restore | TODO |
+| N1 | A30.58: the ci.yml restore harness can run a clean restore after an expected negative-fault run, without weakening the newest-run rule for real failures | #48 `gpt/a30-46-unfiltered-restore-history` | — | On one SHA, in sequence: seed → restore → fault → clean restore all behave as specified. A test proves that a newer real failure still refuses restore | IN_PROGRESS (Claude, tick 2026-10-24 12:47 UTC) |
 | N2 | Integrate #46, #48 and #49 into A13 on a branch without a PR, to check the combined result | `claude/a13-integration` from A13 head | N1 | Merges without conflicts, full tests pass, ci.yml dispatch CI is green on the exact SHA, and a seed → restore pair succeeds on that SHA | TODO |
 | N3 | Design only: an owner-only way to acknowledge a failed production cycle run so the cycle can continue | `docs/` file on `claude/a13-integration` | — | Design document with a threat analysis and the tests it would need. No code until the owner decides | TODO |
 | N4 | Refresh the #45 description with current exact-head CI and the merge order | #45 | — | The description lists exact SHAs and CI runs for #45, #40 and #46–#49 | TODO |
