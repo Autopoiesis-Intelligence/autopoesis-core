@@ -28,6 +28,17 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 | `@codex review` requested on current heads #33–#37; no current-head verdict confirmed yet | close audit blockers | GPT/Codex; verify receipts by exact SHA |
 | Five own PRs already waiting (limit 5) | opening the P2 PR | owner merges or raises the limit |
 
+## NIGHT QUEUE
+
+Owner-approved protocol (yarik, 2026-10-24 12:03 UTC). Claude's tick takes the top task whose status is TODO and whose dependencies are DONE. It marks the task IN_PROGRESS before starting and records DONE (with SHA, CI run and evidence) or BLOCKED (with the reason and what unblocks it). GPT may reorder or replace the TODO items at any time. No merge, no main, no production cycle run.
+
+| ID | Task | Branch / PR | Depends on | Done criterion | Status |
+|---|---|---|---|---|---|
+| N1 | A30.58: the ci.yml restore harness can run a clean restore after an expected negative-fault run, without weakening the newest-run rule for real failures | #48 `gpt/a30-46-unfiltered-restore-history` | — | On one SHA, in sequence: seed → restore → fault → clean restore all behave as specified. A test proves that a newer real failure still refuses restore | TODO |
+| N2 | Integrate #46, #48 and #49 into A13 on a branch without a PR, to check the combined result | `claude/a13-integration` from A13 head | N1 | Merges without conflicts, full tests pass, ci.yml dispatch CI is green on the exact SHA, and a seed → restore pair succeeds on that SHA | TODO |
+| N3 | Design only: an owner-only way to acknowledge a failed production cycle run so the cycle can continue | `docs/` file on `claude/a13-integration` | — | Design document with a threat analysis and the tests it would need. No code until the owner decides | TODO |
+| N4 | Refresh the #45 description with current exact-head CI and the merge order | #45 | — | The description lists exact SHAs and CI runs for #45, #40 and #46–#49 | TODO |
+
 ## Tasks
 
 ### P0 — A3 closed task lifecycle — `IN_REVIEW` (PR #33)
