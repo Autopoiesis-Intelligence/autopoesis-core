@@ -67,8 +67,8 @@ jobs:
           RESTORE_RUN_ID: ${{ inputs.restore_run_id }}
         run: |
           if [[ "$RESTORE_RUN_ID" == "latest" ]]; then
-            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&status=success&branch=${GITHUB_REF_NAME}&per_page=100" > .restore-candidates.json
-            RESTORE_RUN_ID=$(python -c 'import json, os; from autopoesis.queue_snapshot import latest_source_run_id; print(latest_source_run_id(json.load(open(".restore-candidates.json")), current_run_id=os.environ["GITHUB_RUN_ID"], current_branch=os.environ["GITHUB_REF_NAME"]))')
+            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&branch=${GITHUB_REF_NAME}&per_page=100" > .restore-candidates-pages.json
+            RESTORE_RUN_ID=$(python -c 'import json, os; from autopoesis.queue_snapshot import latest_source_run_id; pages=json.load(open(".restore-candidates-pages.json")); payload={"workflow_runs":[run for page in pages if isinstance(page, dict) for run in page.get("workflow_runs", [])]}; print(latest_source_run_id(payload, current_run_id=os.environ["GITHUB_RUN_ID"], current_branch=os.environ["GITHUB_REF_NAME"]))')
             echo "Selected latest snapshot run ${RESTORE_RUN_ID} on branch ${GITHUB_REF_NAME}."
           elif [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
             echo "Invalid restore_run_id: enter the numeric ID of the latest successful snapshot run (digits only) or 'latest', not the field name or a URL. Leave blank when creating the seed run." >&2
@@ -111,14 +111,25 @@ jobs:
           runs_response = subprocess.run(
               [
                   "gh", "api",
+                  "--paginate",
+                  "--slurp",
                   f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/ci.yml/runs"
-                  f"?event=workflow_dispatch&status=success&branch={os.environ['GITHUB_REF_NAME']}&per_page=100",
+                  f"?event=workflow_dispatch&branch={os.environ['GITHUB_REF_NAME']}&per_page=100",
               ],
               check=True, capture_output=True, text=True,
           )
+          run_pages = json.loads(runs_response.stdout)
+          if not isinstance(run_pages, list) or any(
+              not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list)
+              for page in run_pages
+          ):
+              raise SystemExit("Refusing: workflow run history is malformed or incomplete")
+          run_history = {"workflow_runs": [
+              item for page in run_pages for item in page["workflow_runs"]
+          ]}
           provenance = require_latest_source_run(
               provenance,
-              json.loads(runs_response.stdout),
+              run_history,
               current_run_id=os.environ["GITHUB_RUN_ID"],
               current_branch=os.environ["GITHUB_REF_NAME"],
           )
