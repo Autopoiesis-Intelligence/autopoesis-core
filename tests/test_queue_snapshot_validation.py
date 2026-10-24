@@ -398,12 +398,21 @@ class QueueSnapshotValidationTests(unittest.TestCase):
             self._dispatch_run(440, event="push"),
             self._dispatch_run(430, head_branch="other"),
             self._dispatch_run(420, path=".github/workflows/other.yml@refs/heads/main"),
-            self._dispatch_run("410"),
             "not-a-run",
             self._dispatch_run(300),
         ]
 
-        with self.assertRaisesRegex(ValueError, "entry 5 must be a JSON object"):
+        with self.assertRaisesRegex(ValueError, "entry 4 must be a JSON object"):
+            self._latest_check(300, runs)
+
+    def test_run_history_entry_with_non_integer_id_fails_closed(self):
+        runs = [
+            self._dispatch_run(500),
+            self._dispatch_run("410"),
+            self._dispatch_run(300),
+        ]
+
+        with self.assertRaisesRegex(ValueError, "entry 1 must contain an integer run ID"):
             self._latest_check(300, runs)
 
     def test_newer_rerun_dispatch_blocks_snapshot_fallback(self):
