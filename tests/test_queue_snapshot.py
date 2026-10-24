@@ -15,7 +15,7 @@ from autopoesis.queue_snapshot import (
 )
 
 
-REPOSITORY = "Autopoiesis-Intelligence/autopoesis-core"
+REPOSITORY = "Autopoiesis-Intelligence/autopoiesis-core"
 SHA = "a" * 40
 RUN_ID = 12345
 ARTIFACT_DIGEST = "sha256:" + "b" * 64
