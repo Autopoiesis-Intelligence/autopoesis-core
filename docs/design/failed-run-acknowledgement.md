@@ -1,6 +1,6 @@
 # Owner acknowledgement of a failed production cycle run (N3, design only)
 
-Status: DESIGN. No code. Author: Claude; not audited.
+Status: DESIGN (N3, completed as N8). No code. Author: Claude; not audited.
 
 ## Problem
 
@@ -22,23 +22,63 @@ on `main`, changed only through a reviewed PR.
 
 ## Proposal
 
-1. A file on main, `state/acknowledged_cycle_failures.json`:
-   ```json
-   {"version": 1, "acknowledged": [{"run_id": 123, "run_attempt": 1, "reason": "…", "pr": 61}]}
-   ```
-   Every field is required and strictly typed; unknown keys, duplicates or a non-list refuse.
-2. The cycle reads the file from its own checkout (the exact main SHA of the run), never from
-   inputs, the API or an artifact.
-3. The selector skips a relevant run only when its `(id, run_attempt)` is listed **and** its
-   outcome is not a clean success (`conclusion != "success"` or `run_attempt != 1`).
-   It refuses if a listed run is a clean success (acknowledging a good run would be a rollback),
-   or if a listed run id is absent from the history (typo or wrong repository).
-4. After skipping acknowledged runs, the existing rule applies unchanged: the newest remaining
-   relevant run must be a clean success, and it becomes the restore source.
-5. Acknowledging discards the failed run's state. That is safe because the cycle token is
-   `contents: read`: a failed run can leave state only in its own artifact, which is never
-   selected.
-6. An in-progress or queued run (`conclusion == null`) cannot be acknowledged.
+### Format
+
+A file on main, `state/acknowledged_cycle_failures.json`:
+
+```json
+{
+  "version": 1,
+  "acknowledged": [
+    {
+      "run_id": 40100000000,
+      "run_attempt": 1,
+      "workflow_path": ".github/workflows/autopoiesis-cycle.yml",
+      "head_sha": "<40 hex of the failed run>",
+      "conclusion": "failure",
+      "restore_from_run_id": 40090000000,
+      "reason": "one line: what failed and why the state may be discarded",
+      "pr": 61
+    }
+  ]
+}
+```
+
+Every field is required and strictly typed. Unknown keys, duplicate `(run_id, run_attempt)`
+pairs, a non-list `acknowledged` or a `version` other than 1 refuse the whole cycle.
+
+### Matching rules
+
+1. The cycle reads the file only from its own checkout of main. It never takes it from inputs,
+   the API or an artifact.
+2. An entry matches a run only if all of `run_id`, `run_attempt`, `workflow_path`, `head_sha`
+   and `conclusion` equal the values in the paginated run history that the selector already
+   validates. A partial match refuses (ID substitution, wrong workflow, stale or wrong SHA).
+3. Only a non-clean run can be listed (`conclusion` in failure, cancelled, timed_out, or
+   `run_attempt` > 1). Listing a clean success refuses, because that would be a rollback.
+   A run with `conclusion == null` (queued or running) cannot be listed.
+4. Listing a run that is absent from the history refuses (typo, other repository, expired history).
+5. After acknowledged runs are skipped, the existing rule applies unchanged: the newest remaining
+   relevant run must be a clean success. It must also equal the entry's `restore_from_run_id`
+   for the newest acknowledged run. Otherwise the cycle refuses, so the owner approves the exact
+   fallback, not just the failure.
+6. Several failures in a row need one entry each. An unlisted failure newer than the fallback
+   still refuses.
+
+### Reuse and staleness
+
+- An entry is bound to one `(run_id, run_attempt, head_sha)`. It cannot unlock another run.
+- Once a newer clean success exists, the entry is inert: the newest relevant run is that
+  success, so nothing is skipped. Entries stay in the file as history. Removing them is a
+  separate reviewed PR.
+- A re-run of an acknowledged run gets a new `run_attempt` and needs its own entry.
+- The newest-run rule still means one new failure after the fallback blocks again until it is
+  acknowledged too.
+
+### Why discarding the failed run's state is safe
+
+The cycle token is `contents: read`. A failed run can leave state only in its own artifact, and a
+failed run is never selected as a restore source.
 
 ## Threats considered
 
@@ -62,13 +102,18 @@ identity checks. That is the same trust boundary as every other change to main.
 
 ## Tests the implementation would need
 
-- A listed failed run is skipped and the older success is selected.
-- An unlisted newer failure still refuses (current behaviour kept).
-- Listing a clean success refuses; listing an unknown id refuses; a malformed file refuses.
-- A listed run with a different `run_attempt` does not match.
-- Two consecutive failures need two entries.
+1. A listed failed run is skipped and the listed `restore_from_run_id` is selected.
+2. An unlisted newer failure still refuses (current behaviour kept).
+3. Two consecutive failures: one listed refuses, both listed selects the fallback.
+4. Mismatch in each one of `run_attempt`, `workflow_path`, `head_sha`, `conclusion` refuses.
+5. `restore_from_run_id` not equal to the newest remaining clean success refuses.
+6. Listing a clean success, an unknown run ID or a running run refuses.
+7. A malformed file (unknown key, duplicate pair, wrong version, wrong type) refuses.
+8. After a newer clean success, a stale entry changes nothing.
+9. The file is read from the checkout path only. A contract test checks the workflow passes no input for it.
 
-## Open questions for the owner
+## Question for the owner
 
-- Should one entry also cover later re-runs of the same run, or only the exact attempt? (Design: exact attempt.)
-- Should the file live under `state/` or `docs/`? (Design: `state/`.)
+Do you approve implementing this as a file on main, changed only through a PR you merge?
+Accepting it means a PR with an entry is the only way to restart the cycle after a real failure.
+The alternative is that a real failure keeps the cycle stopped until a code change.
