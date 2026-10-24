@@ -11,7 +11,7 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 - **Evidence:** a verdict counts only per `AGENTS.md` ("Review and audit"): an issue comment through the Codex app that names the PR and the exact head SHA. Green CI, a bot reaction or a chat message is not approval.
 - **Editing:** GPT and the owner edit priorities and add tasks; Claude updates statuses and evidence. Disagreements go to Issue #22, not into silent edits.
 
-## Integration freshness (2026-10-24 17:00 UTC)
+## Integration freshness (snapshot 2026-10-24 17:00 UTC, not a live count)
 
 - Live `main` is `4ae19f49f480246a2b42a3e9457190d43f03db6b`. Push CI run 39990133096 on that exact SHA succeeded; its artifact `autopoesis-core-results` (3290 bytes) is present and not expired. Artifact contents not inspected.
 - Open PRs: 15 in total. On `claude/` branches: #33, #34, #35, #36, #37, #40, #45 (7). On `gpt/` branches: #41–#44 and #46–#49 (8). The shared account means the branch prefix, not the GitHub author, marks the owner.
@@ -22,9 +22,11 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 
 | Blocker | Unblocks | Who |
 |---|---|---|
-| Codex verdict on #33 at current HEAD `48c8fa52e0a0190f89ab6b641524f354cea9ee75` | merge of #33 | GPT/Codex, then owner |
-| Codex verdict on #34 at current HEAD `c581ccbb7c9657fc727fa2d053b0ac7a4cf44f5b` | merge of #34 | GPT/Codex, then owner |
-| `@codex review` requested on current heads #33–#37; no current-head verdict confirmed yet | close audit blockers | GPT/Codex; verify receipts by exact SHA |
+| Codex verdict on #33 at `48c8fa52e0a0190f89ab6b641524f354cea9ee75` (CI 39997237027 success) | merge of #33 | GPT/Codex, then owner |
+| Codex verdict on #34 at `c581ccbb7c9657fc727fa2d053b0ac7a4cf44f5b` (CI 39997237221 success) | merge of #34 | GPT/Codex, then owner |
+| Codex verdict on #36 at `f6cd267e6a663349091cbd3d43b2c00eaa317cc4` (CI 39999531556 success) | merge of #36 | GPT/Codex, then owner |
+| Codex verdict on #37 at `6521ddd55fe1c4c369c65834388d72bd6f240a6c` (CI 40102627023 success) | merge of #37 | GPT/Codex, then owner |
+| No Codex receipt is bound to any of these heads (snapshot 2026-10-24 17:00 UTC); older receipts refer to older commits. CI success is not a verdict | all four rows above | GPT/Codex; verify receipts by exact SHA |
 | Seven `claude/` PRs open (limit 5) | opening any new PR | owner merges or reconciles the count |
 
 ## NIGHT QUEUE
