@@ -119,6 +119,18 @@ class LatestSourceRunTests(unittest.TestCase):
     def test_rejects_malformed_payload_or_branch(self):
         with self.assertRaisesRegex(ValueError, "JSON object"):
             latest_source_run_id([], current_run_id=20, current_branch=BRANCH)
+        with self.assertRaisesRegex(ValueError, "entry 0 must be a JSON object"):
+            latest_source_run_id(
+                {"workflow_runs": [None, run(10)]},
+                current_run_id=20,
+                current_branch=BRANCH,
+            )
+        with self.assertRaisesRegex(ValueError, "entry 0 must contain an integer run ID"):
+            latest_source_run_id(
+                {"workflow_runs": [{"id": "10"}, run(10)]},
+                current_run_id=20,
+                current_branch=BRANCH,
+            )
         with self.assertRaisesRegex(ValueError, "non-empty"):
             latest_source_run_id(payload(run(10)), current_run_id=20, current_branch="")
 
