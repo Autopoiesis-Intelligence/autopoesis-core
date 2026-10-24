@@ -69,35 +69,35 @@ jobs:
           if [[ "$RESTORE_RUN_ID" == "latest" ]]; then
             gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&branch=${GITHUB_REF_NAME}&per_page=100" > .restore-candidates-pages.json
             RESTORE_RUN_ID=$(python - <<'PY'
-            import json
-            import os
-            from pathlib import Path
-            from autopoesis.queue_snapshot import latest_source_run_id
+          import json
+          import os
+          from pathlib import Path
+          from autopoesis.queue_snapshot import latest_source_run_id
 
-            pages = json.loads(
-                Path(".restore-candidates-pages.json").read_text(encoding="utf-8")
-            )
-            if not isinstance(pages, list) or any(
-                not isinstance(page, dict)
-                or not isinstance(page.get("workflow_runs"), list)
-                for page in pages
-            ):
-                raise SystemExit(
-                    "Refusing: paginated workflow run history is malformed or incomplete"
-                )
-            payload = {
-                "workflow_runs": [
-                    run for page in pages for run in page["workflow_runs"]
-                ]
-            }
-            print(
-                latest_source_run_id(
-                    payload,
-                    current_run_id=os.environ["GITHUB_RUN_ID"],
-                    current_branch=os.environ["GITHUB_REF_NAME"],
-                )
-            )
-            PY
+          pages = json.loads(
+              Path(".restore-candidates-pages.json").read_text(encoding="utf-8")
+          )
+          if not isinstance(pages, list) or any(
+              not isinstance(page, dict)
+              or not isinstance(page.get("workflow_runs"), list)
+              for page in pages
+          ):
+              raise SystemExit(
+                  "Refusing: paginated workflow run history is malformed or incomplete"
+              )
+          payload = {
+              "workflow_runs": [
+                  run for page in pages for run in page["workflow_runs"]
+              ]
+          }
+          print(
+              latest_source_run_id(
+                  payload,
+                  current_run_id=os.environ["GITHUB_RUN_ID"],
+                  current_branch=os.environ["GITHUB_REF_NAME"],
+              )
+          )
+          PY
             )
             echo "Selected latest snapshot run ${RESTORE_RUN_ID} on branch ${GITHUB_REF_NAME}."
           elif [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
@@ -273,6 +273,10 @@ jobs:
       - name: Validate workflow YAML syntax
         run: |
           ruby -e 'require "yaml"; files = Dir.glob(".github/workflows/*.{yml,yaml}").sort; abort "No workflow files found" if files.empty?; files.each { |f| YAML.load_file(f, aliases: true); puts "Parsed #{f}" }'
+      - name: Check shell syntax of every workflow run step
+        run: |
+          # Restore and probe steps run only on dispatch, so a syntax error there passes PR CI unseen.
+          ruby -e 'require "yaml"; require "tempfile"; bad = 0; Dir.glob(".github/workflows/*.{yml,yaml}").sort.each { |f| (YAML.load_file(f, aliases: true)["jobs"] || {}).each { |job, spec| (spec["steps"] || []).each { |step| next unless step["run"]; Tempfile.create("step") { |t| t.write(step["run"]); t.flush; out = IO.popen(["bash", "-n", t.path], err: [:child, :out], &:read); unless $?.success? && out.empty?; warn out; bad += 1; warn "Shell syntax error: #{f} job #{job} step #{step["name"].inspect}"; end } } } }; abort "#{bad} step(s) with shell syntax errors" if bad > 0; puts "All run steps pass bash -n."'
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
       - name: Run file-based tasks
