@@ -53,6 +53,10 @@ def select_prior_successful_run(
         if run["id"] != current_run_id
         and run["head_branch"] == "main"
         and run["path"].split("@", 1)[0] == WORKFLOW_PATH
+        # A skipped run never started the job (disable switch, repository or branch guard),
+        # so it changed no state; counting it would make the disable switch block bootstrap
+        # and restore forever.
+        and run.get("conclusion") != "skipped"
     ]
     relevant.sort(
         key=lambda run: (run["run_number"], run["id"]),

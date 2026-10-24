@@ -53,6 +53,18 @@ class ScheduledStateSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "run_attempt=2"):
             select_prior_successful_run(pages, current_run_id=12, bootstrap=False)
 
+    def test_skipped_runs_from_the_disable_switch_are_ignored(self):
+        disabled_only = [{"workflow_runs": [run(11, 11, conclusion="skipped")]}]
+        self.assertIsNone(select_prior_successful_run(disabled_only, current_run_id=12, bootstrap=True))
+        with self.assertRaisesRegex(ValueError, "No successful prior snapshot"):
+            select_prior_successful_run(disabled_only, current_run_id=12, bootstrap=False)
+        paused_after_success = [{"workflow_runs": [
+            run(10, 10, conclusion="success"),
+            run(11, 11, conclusion="skipped"),
+        ]}]
+        selected = select_prior_successful_run(paused_after_success, current_run_id=12, bootstrap=False)
+        self.assertEqual(selected["id"], 10)
+
     def test_bootstrap_refused_after_failed_only_history(self):
         pages = [{"workflow_runs": [run(11, 11, conclusion="failure")]}]
         with self.assertRaisesRegex(ValueError, "unresolved prior cycle"):
