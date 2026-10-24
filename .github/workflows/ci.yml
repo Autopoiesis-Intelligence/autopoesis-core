@@ -68,7 +68,37 @@ jobs:
         run: |
           if [[ "$RESTORE_RUN_ID" == "latest" ]]; then
             gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&branch=${GITHUB_REF_NAME}&per_page=100" > .restore-candidates-pages.json
-            RESTORE_RUN_ID=$(python -c 'import json, os; from autopoesis.queue_snapshot import latest_source_run_id; pages=json.load(open(".restore-candidates-pages.json")); payload={"workflow_runs":[run for page in pages if isinstance(page, dict) for run in page.get("workflow_runs", [])]}; print(latest_source_run_id(payload, current_run_id=os.environ["GITHUB_RUN_ID"], current_branch=os.environ["GITHUB_REF_NAME"]))')
+            RESTORE_RUN_ID=$(python - <<'PY'
+            import json
+            import os
+            from pathlib import Path
+            from autopoesis.queue_snapshot import latest_source_run_id
+
+            pages = json.loads(
+                Path(".restore-candidates-pages.json").read_text(encoding="utf-8")
+            )
+            if not isinstance(pages, list) or any(
+                not isinstance(page, dict)
+                or not isinstance(page.get("workflow_runs"), list)
+                for page in pages
+            ):
+                raise SystemExit(
+                    "Refusing: paginated workflow run history is malformed or incomplete"
+                )
+            payload = {
+                "workflow_runs": [
+                    run for page in pages for run in page["workflow_runs"]
+                ]
+            }
+            print(
+                latest_source_run_id(
+                    payload,
+                    current_run_id=os.environ["GITHUB_RUN_ID"],
+                    current_branch=os.environ["GITHUB_REF_NAME"],
+                )
+            )
+            PY
+            )
             echo "Selected latest snapshot run ${RESTORE_RUN_ID} on branch ${GITHUB_REF_NAME}."
           elif [[ ! "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]]; then
             echo "Invalid restore_run_id: enter the numeric ID of the latest successful snapshot run (digits only) or 'latest', not the field name or a URL. Leave blank when creating the seed run." >&2
