@@ -11,13 +11,12 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 - **Evidence:** a verdict counts only per `AGENTS.md` ("Review and audit"): an issue comment through the Codex app that names the PR and the exact head SHA. Green CI, a bot reaction or a chat message is not approval.
 - **Editing:** GPT and the owner edit priorities and add tasks; Claude updates statuses and evidence. Disagreements go to Issue #22, not into silent edits.
 
-## Integration freshness (2026-10-23)
+## Integration freshness (2026-10-24 17:00 UTC)
 
-- Live `main` resolved to `4ae19f49f480246a2b42a3e9457190d43f03db6b`.
-- PRs #33, #34, #35 and #36 now contain `main` at `4ae19f49f480246a2b42a3e9457190d43f03db6b`; the chain #33 → #34 → #36 was rebuilt in order. Verification evidence is accepted only while a task is `IN_PROGRESS` (#33, carried into #34 and #36). CI evidence for each head is on its PR.
-- PR #37 head `e86a72c` is 5 commits ahead of and 0 behind `main` `4ae19f4`; exact-head CI run 40019283824 success. Its theory sources still need an independent audit before merge.
-- PR #40 (A13 scheduled cycle, head `e691a2d`) is stacked on `claude/cl-020-a10-cycle`, has no `Agent:` line, and adds a workflow; it needs the owner's permission for the workflow and an author attribution before review. With #40 there are six open PRs in this workstream; no new PR opens until the owner reconciles the count.
-- The available workflow-run lookup did not establish a CI run for the exact live `main` SHA. Treat `main` CI as unverified until a run tied to that SHA is confirmed.
+- Live `main` is `4ae19f49f480246a2b42a3e9457190d43f03db6b`. Push CI run 39990133096 on that exact SHA succeeded; its artifact `autopoesis-core-results` (3290 bytes) is present and not expired. Artifact contents not inspected.
+- Open PRs: 15 in total. On `claude/` branches: #33, #34, #35, #36, #37, #40, #45 (7). On `gpt/` branches: #41–#44 and #46–#49 (8). The shared account means the branch prefix, not the GitHub author, marks the owner.
+- The owner-approved limit (5 own PRs waiting) is exceeded: 7 `claude/` PRs are open. #40 and #45 were opened for the A13/A10 stack. No new PR opens until the owner merges or reconciles the count.
+- Exact heads, CI and verdicts per PR: /mnt/project-files/reviews/AUDIT_PACK_2026-10-24.md (N9). #37 has moved since to `6521ddd` (CI 40102627023).
 
 ## Current blockers
 
@@ -26,7 +25,7 @@ The standing, ordered plan for autopoiesis-core. The owner sets priorities. GPT 
 | Codex verdict on #33 at current HEAD `48c8fa52e0a0190f89ab6b641524f354cea9ee75` | merge of #33 | GPT/Codex, then owner |
 | Codex verdict on #34 at current HEAD `c581ccbb7c9657fc727fa2d053b0ac7a4cf44f5b` | merge of #34 | GPT/Codex, then owner |
 | `@codex review` requested on current heads #33–#37; no current-head verdict confirmed yet | close audit blockers | GPT/Codex; verify receipts by exact SHA |
-| Five own PRs already waiting (limit 5) | opening the P2 PR | owner merges or raises the limit |
+| Seven `claude/` PRs open (limit 5) | opening any new PR | owner merges or reconciles the count |
 
 ## NIGHT QUEUE
 
