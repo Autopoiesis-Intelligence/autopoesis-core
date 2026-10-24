@@ -30,7 +30,7 @@ Entry fields: `Kind`, `Status`, `Claim`, `Grounds`, `Counterarguments`, `Alterna
 - Kind: engineering
 - Status: HYPOTHESIZED
 - Claim: separating candidate generation, testing, selection and independent verification lowers the risk of accepting an erroneous change.
-- Grounds: proposed by GPT (owner's message, 2026-10-23) as an example entry. Related sources, not checked: SRC-004, SRC-005, SRC-007, SRC-008.
+- Grounds: proposed by GPT (owner's message, 2026-10-23) as an example entry. Related sources: SRC-004, SRC-005, SRC-007, SRC-008 (opened only partly, see their `Checked` lines; not enough to raise the status).
 - Counterarguments: separate stages are not independent checks by themselves; a shared wrong assumption can pass every stage. A verifier that repeats the generator's reasoning adds no independence.
 - How to check: tests for verification bypass, stale results, races and illegal queue transitions; contracts between stages that the verifier cannot satisfy by copying the executor's result.
 - Links: CON-003, T2C-002, OQ-006.
@@ -52,7 +52,7 @@ Entry fields: `Kind`, `Status`, `Claim`, `Grounds`, `Counterarguments`, `Alterna
 - Kind: design
 - Status: ACCEPTED
 - Claim: progress is counted only as accepted, independently verified changes, not as task count, PASS count, queue status or a no-op.
-- Grounds: `AGENTS.md` rule 5 and `docs/AUTONOMY_ROADMAP_SPEC.md` A9 on `main` at `685c5a0`. Related, not checked: SRC-006 (endpoint scores hide regressions), SRC-007 (an evolving policy can influence its own evaluator).
+- Grounds: `AGENTS.md` rule 5 and `docs/AUTONOMY_ROADMAP_SPEC.md` A9 on `main` at `685c5a0`. Related: SRC-006 (endpoint scores hide regressions) and SRC-007 (an evolving policy can influence its own evaluator), both checked at abstract level only; see their `Checked` lines.
 - Counterarguments: a strict count can hide useful partial work, such as a correct rejection.
 - Alternatives: count benchmark scores or completed tasks. Not adopted.
 - Risks: verification that is not truly independent makes the count misleading (CLM-003).

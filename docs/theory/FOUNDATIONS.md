@@ -21,7 +21,7 @@ Entry fields: `Definition`, `Not to be confused with`, `Sources`, `Project use`,
 ### CON-003 — Evolutionary cycle
 - Definition: the loop observe → detect a problem → form a candidate → test → verify independently → obtain authority bound to this change and parent state → execute within it → commit and check persistence → observe consequences.
 - Not to be confused with: one step of the loop existing in code. Steps existing ≠ the cycle being implemented.
-- Sources: SRC-004 (archive of variants with empirical evaluation; not checked). The cycle itself is a project decision recorded in `PROJECT_UNDERSTANDING.md` (project files, 2026-10-19), not in the repository.
+- Sources: SRC-004 (archive of variants with empirical evaluation; alphaXiv generated summary only). The cycle itself is a project decision recorded in `PROJECT_UNDERSTANDING.md` (project files, 2026-10-19), not in the repository.
 - Project use: `AGENTS.md` rule 6; roadmap stages A3–A9.
 - Claims: CLM-003, CLM-009.
 
